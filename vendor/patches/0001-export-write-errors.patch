@@ -1,0 +1,38 @@
+--- a/import.c
++++ b/import.c
+@@ -1070,8 +1070,9 @@
+     }
+     base64_encode_fp(fp, ptrlen_from_strbuf(outblob), 64);
+     fputs(footer, fp);
+-    fclose(fp);
+-    ret = true;
++    ret = !ferror(fp);
++    if (fclose(fp) != 0)
++        ret = false;
+ 
+   error:
+     if (outblob)
+@@ -1638,8 +1639,9 @@
+     fputs("-----BEGIN OPENSSH PRIVATE KEY-----\n", fp);
+     base64_encode_fp(fp, ptrlen_from_strbuf(cblob), 64);
+     fputs("-----END OPENSSH PRIVATE KEY-----\n", fp);
+-    fclose(fp);
+-    ret = true;
++    ret = !ferror(fp);
++    if (fclose(fp) != 0)
++        ret = false;
+ 
+   error:
+     if (cblob)
+@@ -2341,8 +2343,9 @@
+     }
+     base64_encode_fp(fp, ptrlen_from_strbuf(outblob), 70);
+     fputs("---- END SSH2 ENCRYPTED PRIVATE KEY ----\n", fp);
+-    fclose(fp);
+-    ret = true;
++    ret = !ferror(fp);
++    if (fclose(fp) != 0)
++        ret = false;
+ 
+   error:
+     if (outblob)

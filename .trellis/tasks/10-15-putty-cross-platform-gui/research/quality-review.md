@@ -1,0 +1,184 @@
+# 质量审查记录
+
+## 第一轮：构建与发布
+
+2026-10-15，检查子代理按 PRD、设计、G01–G15 和已落地的核心／Qt 规范审查。核心和 GUI 代理仍在补齐测试，本轮只修改已交接的发布文件。
+
+### 已修复
+
+- `.github/workflows/build-packages.yml`、`docs/构建与发布.md`：Windows 测试程序运行于构建目录，在打包部署前不会自动从源码 Qt 的安装目录找到 Qt DLL。为 CTest 增加同版本 Qt `bin` 的 PATH。包启动脚本仍移除 SDK 路径，避免开发运行库掩盖发布依赖缺失。
+
+### 已检查
+
+- 发布配置强制 Qt 6.8.3、x64、MSVC 2022 或对应 Ubuntu／GCC，开发归档有明确名称。
+- Windows 收集本地 CRT、Qt DLL 和平台插件；Ubuntu 单独安装到 `/opt/puttygen-gui`，桌面入口和卸载脚本不操作用户密钥。
+- Qt 来源锁、各模块源码归档和完整许可随包安装；PuTTY 原许可证完整保留。
+- `packaging/*.py` AST／语法检查通过；Shell 脚本 `sh -n` 通过；CI YAML 用 PyYAML 解析通过。
+- 本机 Qt 6.12.0 的发布配置负向检查成功：CMake 在版本锁处拒绝发布构建。检查目录 `.tmp/review/release-lock-negative/`，退出码 1 是预期结果。
+
+### 交给实施代理修复
+
+- `src/ui/ppk_dialog.cpp` 的接受逻辑原先只检查正整数，缺少原版的完整参数校验。GUI 代理已改为 `ValidateParameters` 工作线程请求，使用 64 字节占位口令执行核心校验，非法内存／并行度有错误反馈且不提交设置；回归通过。
+
+## 第二轮：完整产品代码与本机行为
+
+本轮目录仍为布局迁移之前的 `src/`、`resources/`、`tests/`。用户补充仓库为完整 PuTTY 套件之后，主代理将单独安排组件目录迁移；此记录不把布局尚未迁移视为已经完成。
+
+### 已修复的实际问题
+
+- `src/ui/main_window.*`：输入新注释后立刻加载坏文件或取消错误口令重试，后台忙碌暂停计时器，而失败／取消早返回没有恢复提交，导致公钥与字段注释不一致。新增 `resumeCommentUpdate()`，只在完整操作／模态流程结束且无冲突状态时恢复；加载、证书选择、PPK 和保存模态流程开始前暂停，避免 Comment 抢占随后发起的 Load／Save。GUI 代理先复现两条失败，再验证修复；另验证文件选择框保持 400ms 时不提交 Comment，取消后恢复。
+- `src/app/language_manager.*`、`packaging/verify_runtime.cmake.in`：原先只安装自有 JSON 翻译，Qt 文件对话框的 Back／Forward／Parent Directory／Create New Folder／List View／Detail View 实际为英文。现在先加载官方 `qtbase_zh_CN.qm`，再装应用翻译；英文时移除两者。正式包必须包含该 qm。临时 Qt 探针确认六项工具提示及显示隐藏文件菜单变为中文，原生文件对话框未被强制替换。
+- `tests/gui/gui_test.cpp`：GUI 代理把 QSettings 测试切为 IniFormat，防止 Windows 测试写原生注册表；窗口图标改为 PNG，避免发布包无 qtsvg 插件时缺少图标。
+- `src/CMakeLists.txt`：GUI 测试根按构建目录哈希隔离，配置、运行时、文件、截图都位于 `.tmp/tests/gui-<哈希>/`；并发 Ubuntu 构建不再共享 CA 或语言配置。相应测试路径已由 GUI 代理同步。
+- `.trellis/spec/frontend/state-management.md`：同步参数完整校验、注释与模态任务时序、Qt 官方翻译和 Windows／并发测试隔离契约。
+
+### 本轮核验结果
+
+- 专用 `.tmp/review/debug/` 使用 GNU 16.2.1、Qt 6.12.0 完整编译成功；自有 C／C++ 警告选项下无警告。此为本机类型／编译检查，不是 Qt 6.8 或目标平台构建证据。
+- 核心 CTest 2/2 通过，8.87 秒；额外使用固定版本上游 CLI 运行完整互操作脚本通过，覆盖全部算法／适用格式、公钥、SHA256／MD5、签名和证书。
+- 最终完整 CTest 3/3 通过，15.58 秒；其中 GUI 7.29 秒，Qt Test 输出 16 passed、0 failed、0 skipped，包含新保存／覆盖／取消、剪贴板、两条注释恢复回归及官方标准文件控件中英翻译回归。GUI 代理另报告 2 倍缩放通过。此前追加同名翻译回归一度产生重复声明，已保留一份完整回归并清除重复，最后编译及上述测试均通过。
+- 核心代理 ASan／UBSan 日志 `.tmp/build/core-sanitize/Testing/Temporary/LastTest.log` 为 2/2 通过、31.40 秒；使用 `detect_leaks=0`，因此该结果不构成 LeakSanitizer 检测通过声明。
+- `nm` 核验生产 `libpg-core.a` 无 `pg_test_` 符号，故障注入与测试签名／证书助手只在测试库中。
+- 官方归档 SHA256 再次比对一致；逐一比对 `vendor/putty` 所有普通文件，无缺失，仅 `import.c` 有已记录的三处导出流错误／关闭错误补丁。
+- 读取真实 PRNG 路径确认 `prng_seed_begin` 将已有 generator 作为 keymaker，再混入新种子；系统随机种子后的鼠标重播种保留此前状态。不存在用鼠标替代系统随机源的退化。
+- 审查单工作线程、密钥替换与错误保留、C 缓冲区释放、后台进度排队、对象销毁和关闭等待；没有发现尚未修复的具体本机代码问题。
+- 查看英文 1 倍、中文 2 倍成钥截图：标签完整、口令隐藏、无任务或开发需求文字。截图是离屏界面证据。
+
+### AC 与 G01–G15 范围
+
+| 范围 | 本轮证据与边界 |
+| --- | --- |
+| G01、G13／AC2、AC5 | 主窗／菜单共用动作、状态投影、助记键和控件条件已审查；截图与 GUI 状态回归通过。未进行 Windows 原版运行对照。 |
+| G02–G05／AC2、AC7 | 全部算法／曲线、三种素数策略、强 RSA 传入原核心，生成及适用格式测试通过；概率进度为真实步骤估计。 |
+| G03／AC10 | 鼠标事件限速和后台真实完成验证；退出等待保持事件循环。离屏合成鼠标事件不替代真实桌面鼠标体验。 |
+| G06、G08、G15／AC9、AC10 | 加密加载、错误口令重试／取消、损坏文件、口令不一致／无口令警告、错误后保留密钥以及注释恢复已验证。 |
+| G07、G09、G11／AC7、AC9 | 独立指纹、公钥、全部适用格式往返、实际剪贴板及文件选择保存／覆盖／取消回归通过。 |
+| G10、G12／AC2、AC9 | PPK v2/v3、三种 Argon2、自动／固定参数、非法参数不提交、证书匹配／不匹配／详情／移除已验证。 |
+| G14／AC4、AC8 | 关于与上游许可资源、双语离线帮助、官网入口和默认／持久语言逻辑审查；Qt 标准文件控件翻译遗漏已修。 |
+| AC3、AC6 | 发布目标限制已检查，临时产物与测试根均放项目 `.tmp/`。用户新增组件布局要求另需迁移复查。 |
+| AC1、R1、R10 | 发布脚本静态审查通过；目标 Qt、Ubuntu 包和原生 Windows 证据尚不能由本机检查代替。 |
+
+### 尚待最终审查／验收
+
+- 用户新增套件／组件布局迁移后的 CMake、资源、测试、打包和文档路径复查。
+- 主代理正在执行两个 Ubuntu 的 Qt 6.8.3 原生构建与包检查，本轮不重复构建，不将尚未完成的日志当通过证据。
+- Windows 原生编译、Windows 10／11 桌面和两 Ubuntu 的用户桌面验收。CI 配置和静态审查不能替代这些结果。
+
+
+## 第三轮：套件目录迁移与完整产品复查
+
+本轮审查当前迁移后的全部自有接口、核心适配、Qt 窗口／线程／翻译、测试、共享上游构建、源码工具、组件安装规则及 CI。先前 G01–G15 行为契约未因目录迁移改变，新增 AC11 另行验证。没有把其他 PuTTY 工具列为本期已实现组件。
+
+### 本轮修复
+
+- `apps/puttygen/cmake/Packaging.cmake`：两个 Ubuntu 的真实 Qt 6.8.3 发布打包同时暴露中文标准控件翻译缺失。Qt 的通用部署默认把输入目录合并为 `qt_zh_CN.qm`，应用实际加载的是 `qtbase_zh_CN.qm`；仅依赖自动部署无法满足这个文件契约。现在根据 Qt 导出的安装前缀与翻译目录显式安装 `qtbase_zh_CN.qm`，配置阶段检查源文件存在，两平台均通过 `NO_TRANSLATIONS` 禁止自动合并，英文直接使用 Qt 源文本。原有安装后强制翻译存在性检查保持。Qt 6.8.3 实际 CMake 实现已确认该参数受支持；目标打包复验由主代理执行，结果单独记录。
+
+### 迁移与范围核验
+
+- 套件根 `project(putty)` 与 `PUTTY_BUILD_PUTTYGEN` 为唯一组件入口。独立 `.tmp/review/component-off/` 配置使用 `-DPUTTY_BUILD_PUTTYGEN=OFF -DCMAKE_DISABLE_FIND_PACKAGE_Qt6=TRUE`，配置与构建均通过，关闭组件确实不调用 Qt 查找。
+- `apps/puttygen/` 集中组件源码、资源、测试、安装和包验证。共享上游 `vendor/putty/`、`cmake/UpstreamPuTTY.cmake`、Qt 来源工具 `tools/qt/` 与根许可保持唯一来源。核心接口仍服务于 PuTTYgen，未加入无实际用途的套件业务抽象。
+- 核对组件 CMake 所有源码和测试路径、Qt 资源清单全部文件、共享 PuTTY 许可证相对路径、工作树 `.tmp/` 测试根及固定上游 CLI 的构建／互操作入口。根 CPack 配置输出、安装材料和开发包名称、Windows／Ubuntu CI 与文档中的调用均使用迁移后路径。
+- 再次读取全部 C 适配和 Qt 业务代码：单线程核心、错误分类、失败后旧密钥、临时口令／熵清除、证书替换和关闭等待与已记录契约一致；未发现迁移带来的新业务缺陷。G01–G15 的原有入口、适用条件和错误／取消处理保持。
+- 发布配置固定 Qt 版本、目标架构和工具链，材料包含 Qt 模块完整许可证、来源锁、源码归档及重建脚本。新打包修复不会把测试夹具或上游 CLI 加入安装树。
+
+### 本轮检查与证据
+
+- Python AST 检查：`tools/qt/build_qt.py`、组件 `smoke_package.py` 和 `interop_test.py` 全部通过；检查不写入 `__pycache__`。Qt 来源锁与中文 JSON 解析通过；GitHub Actions YAML 解析通过；QRC 所有引用存在。
+- `sh -n` 检查 Ubuntu 依赖安装脚本、组件启动脚本及安装／卸载维护脚本全部通过。工程没有另外配置独立 linter；本轮语法检查与编译告警分别记录，不把 YAML 解析描述为实际 Actions 运行。
+- 迁移后 `.tmp/review/component-debug/Testing/Temporary/LastTest.log`：核心、固定 CLI 互操作与 GUI 共 3/3 通过，总计 18.66 秒，分别 8.54、4.04、6.08 秒。GUI 为 16 passed、0 failed、0 skipped；该构建是本机 Qt 6.12.0／GNU 16.2.1，不作为锁定 Qt 或 Windows 证据。
+- 迁移后根 CPack 开发 TGZ 实际生成成功，归档主程序、PuTTY 许可与第三方通知存在，SHA256 相符；未包含测试私钥、测试程序或固定 CLI。此归档按名称明确为开发包，未宣称包含发布 Qt。
+- 主代理已报告 Ubuntu 22.04／GCC 11 与 Ubuntu 24.04／GCC 13、Qt 6.8.3 的迁移后 Release 编译和全部 CTest 通过；本轮最初 CPack 失败的翻译缺失已如上修复。打包、安装卸载、图形后端结果待主代理实际复验后补入平台报告。
+
+### 保留的验收边界
+
+- 本轮自有代码静态审查、脚本语法与本机完整测试没有剩余已知产品缺陷。最终发布完整性仍取决于上述真实目标包验证，不用本机开发归档代替正式 DEB／ZIP。
+- Windows 原生 MSVC 编译、ZIP 启动及 Windows 10／11 桌面未验证；GitHub 认证当前不可用，已有工作流文件不能视为已触发或通过 Actions。
+- XCB／Wayland QtTest 和安装包启动即使通过，也不等同于真实桌面人工 G01–G15 对照验收。Windows 原版运行对照、真实鼠标操作与桌面体验仍需单独完成。
+- 前轮 ASan／UBSan 结果仍仅是核心已运行的范围，且 `detect_leaks=0`；没有增加 LeakSanitizer 或全 GUI sanitizer 通过声明。
+
+
+## 第四轮：目标包插件依赖修复
+
+翻译修复后，两 Ubuntu 的配置与 CPack 翻译检查通过，随后插件强制检查揭示第二个真实问题：暂存包没有任何 Qt 插件，生成目录中也没有 `puttygen-gui-plugins.cmake`。Qt 6.8.3 的实际 CMake 路径表明，普通 `add_executable` 没有自动完成 Qt finalizer，部署 API 因而缺少插件清单。此外，Qt 默认平台仅为 XCB，Wayland 和离屏插件不默认收集；Wayland shell／绘图／装饰插件属于单独模块。
+
+- 修复仅涉及组件 `cmake/Packaging.cmake`：在正式 Linux 分支查找并链接 `Qt6::WaylandClient`，显式选择 XCB、Wayland generic／EGL 及离屏平台，以及默认不收集的 IBus／Compose 输入法和 XdgDesktopPortal 主题插件；两平台生成部署脚本后调用 `qt_finalize_target`。使用官方插件依赖图与部署流程收集各插件及其动态依赖，避免只复制平台 `.so` 而遗漏 Wayland 子插件或 Qt 库。Windows 分支不查找 Linux 模块。
+- 保留翻译和 XCB／Wayland 插件强制检查。新依赖只影响发布目标的合理重链接，不改密钥接口或用户业务流程。主代理已确认重新执行目标配置、构建、测试、打包与干净环境启动。
+- 本轮主代理新增原生后端证据：Qt 6.8.3 的 XCB QtTest 在 Ubuntu 22.04 和 24.04 均 16 项通过。Headless Weston 不提供 `wl_seat`，两平台 Wayland 测试各 14 项通过、鼠标熵与剪贴板 2 项失败；日志保留，不忽略失败或删测试。主代理继续用提供输入 seat 的合成器和实际输入验证，不能将当前 Wayland 结果描述为全通过。
+
+修复后已读取两个目标构建生成的 `.qt/puttygen-gui-plugins.cmake`，包含 XCB、Wayland generic／EGL、离屏平台和 Wayland shell／绘图／装饰插件，证明 finalizer 修复实际生效。后续补入的三个输入／主题插件仍需在最终目标清单和包内复验；它们补全 Linux 中文输入与桌面文件框所需的原有 Qt 插件能力，不新增 Windows 依赖。
+
+
+## 第五轮：目标打包的 UTF-8 环境
+
+主代理确认 Ubuntu 22.04 首次完整 DEB 已生成，插件强制检查已经通过。Ubuntu 24.04 的 CMake 3.28／`LC_ALL=C` 在 CPack 处理 `构建与发布.md` 时发生 `Can't lstat`；没有改动或删除中文文件名。
+
+- `.github/workflows/puttygen.yml`：仅 Ubuntu job 设置 `LC_ALL: C.UTF-8`；Windows 环境保持原样。
+- `docs/构建与发布.md`：两个 Ubuntu 发布环境统一使用固定 CMake 3.30.9，构建／打包示例明确 `export LC_ALL=C.UTF-8`，说明中文文件名要求。主代理在两目标环境复验最终包。
+- YAML 解析、Ubuntu locale 值及 Windows 未新增该环境项的检查通过。
+- Wayland 新环境使用 Xvfb 上的嵌套 Weston 并提供输入 seat。Ubuntu 22.04 除鼠标熵之外的 15 项 GUI 测试全部通过，包含此前因缺少 seat 失败的剪贴板。Wayland 不支持 `QTest::mouseMove` 的指针 warp，鼠标熵改用独立的真实外部输入验证，结果仍待主代理报告；未修改产品 QtTest、删除断言或把 headless 限制视为产品缺陷。
+
+
+## 第六轮：最终 DEB 清单与冒烟临时路径
+
+主代理在两个 Ubuntu 环境使用 UTF-8 locale 与 CMake 3.30.9 生成最终 DEB。检查子代理独立通过 `ar`／`tar` 读取两个包的真实 data 归档，逐项确认 XCB、Wayland generic／EGL、离屏四种平台插件，IBus、Compose、XdgDesktopPortal 三个桌面插件，Wayland xdg-shell 及 `qtbase_zh_CN.qm` 全部存在。前述中文路径与插件缺失打包问题的目标检查已经通过；干净环境的实际安装、启动和卸载仍由主代理验证。
+
+`apps/puttygen/packaging/smoke_package.py::launch` 原先在 Linux 调用环境缺少 `XDG_RUNTIME_DIR` 时可能让 Qt 隐式使用系统临时目录。现在仅缺省时创建本次冒烟工作目录的 `runtime/`，设置权限 0700 并导出；已有 Wayland 运行时目录保持原样，避免破坏合成器 socket。使用替代进程分别检查缺省路径／权限与既有 Wayland 目录保留，两分支均通过；Python AST 检查通过。该工具不进入 DEB，修复无需重包。
+
+
+## 第七轮：最终 Ubuntu 发布与质量门收束
+
+本轮不重复运行已经完成的测试；检查子代理直接读取目标构建日志、CMake 工具链记录、六份冒烟 JSON 与动态库结果，并重新计算两个最终 DEB 的 SHA256。以下结果取代前轮相应“待复验”状态，历史失败日志仍保留。
+
+### 最终发布构建与测试
+
+| 目标 | 工具链 | 最终 Release CTest | 实际 CPack |
+| --- | --- | --- | --- |
+| Ubuntu 22.04 x64 | Qt 6.8.3、GCC 11.4.0、CMake 3.30.9、UTF-8 locale | 3/3 通过，11.34 秒；核心、固定上游 CLI 互操作、GUI | DEB 与 SHA256 均生成 |
+| Ubuntu 24.04 x64 | Qt 6.8.3、GCC 13.3.0、CMake 3.30.9、UTF-8 locale | 3/3 通过，12.08 秒；核心、固定上游 CLI 互操作、GUI | DEB 与 SHA256 均生成 |
+
+证据为 `.tmp/platform/{22.04,24.04}/repackage3-verify.log`、`.tmp/build/ubuntu{22.04,24.04}/CMakeCache.txt` 及其 `Testing/Temporary/LastTest.log`。两个 Release 的 GUI 均为 QtTest 16 passed、0 failed、0 skipped；这是真实目标版本证据，与此前本机 Qt 6.12.0 检查分开。
+
+### 无 Qt SDK 的安装包验证
+
+主代理使用各自干净的官方 Ubuntu 环境执行最终 DEB 安装、依赖检查、桌面入口校验、程序启动与卸载。每个发行版分别完成 offscreen、XCB、Wayland 三轮，合计六轮全部成功。每份 `结果.json` 仅在程序保持运行、卸载和受跟踪文件残留检查全部完成后写出成功。检查子代理逐一读取六份 JSON，确认其包 SHA、平台和成功结果匹配，另读取全部 `动态库.txt` 确认主程序没有 `not found`。
+
+- 结果目录：`.tmp/package-smoke/puttygen-gui-0.1.0-ubuntu{22.04,24.04}-amd64/{offscreen,xcb,wayland}/`。
+- 安装／卸载日志：`.tmp/platform/{22.04,24.04}/clean-verify.log`。`desktop-file-validate` 只有 Security 分类补充建议，没有错误；该提示不阻止桌面入口有效性或程序运行。
+- Ubuntu 22.04 最终包 SHA256：`cc6f03b45d76f98cd0b6574832a97dc96d95d0cafec5784354e835a4844697e6`。
+- Ubuntu 24.04 最终包 SHA256：`3c3f63de831d80a9f8f7e19ea6e77f00895a91b8b37a42d4021306dfdaeae8f3`。
+
+检查子代理对两个实际 DEB 重新计算 SHA256，与六份 JSON 和以上数值均一致。该结果证明两种 Ubuntu 的发布物不依赖构建机 Qt SDK 即可安装并在三种插件配置下启动，不能延伸为全部桌面功能的人工验收通过。
+
+### 图形后端与 Windows 辅助证据
+
+- `.tmp/platform/{22.04,24.04}/gui-xcb.txt`：各自 Qt 6.8.3、XCB 下完整 QtTest 16 项通过，含鼠标熵、剪贴板、文件保存与覆盖及错误恢复。
+- `.tmp/platform/22.04/gui-wayland-nested.txt`：带输入 seat 的嵌套 Weston 下，排除鼠标熵后的 15 项通过，包含实际剪贴板回读。这里是明确选取的 15 项测试，不能写为完整 16 项通过。Wayland 指针 warp 与真实外部输入的鼠标熵验证仍待结果，之前无 seat 环境的失败日志没有删除或隐藏。
+- `.tmp/platform/24.04/windows-core-migrated.log`：迁移后的 Windows x64 核心与测试程序使用 MinGW 交叉编译、链接成功，产出 `.exe`。没有运行该程序，没有编译或运行 Windows Qt GUI，因此不能替代原生 MSVC、Windows ZIP 或 Windows 10／11 验证。
+
+### 当前整体结论与未完成项
+
+1. 产品实施、套件组件目录、全部 G01–G15 的代码入口与自动化功能覆盖、脚本语法及本机／目标 Ubuntu 的编译和核心互操作检查已完成。审查发现的参数校验、注释时序、翻译、部署插件、UTF-8 打包及冒烟临时目录问题均已修复，没有剩余已知未修复的产品代码缺陷。
+2. AC3–AC9 的相应实现及已有自动化检查、AC11 的目录与可选构建已核实。AC1 的两 Ubuntu 发布安装与启动部分通过；AC2／AC10 的已测试功能与后台生命周期有证据，但仍保留原生桌面人工对照及 Wayland 实际熵验证边界。已有 Actions 配置不构成实际运行证据。
+3. 完整跨平台验收门尚未全部通过：Windows 原生 MSVC 构建、Windows ZIP、Windows 10／11 运行和原版 Windows GUI 人工逐项比对尚未完成；Linux 真实桌面人工体验及 Wayland 实际鼠标熵仍待验证。不能据当前 Ubuntu 自动化结果宣称整个用户目标全部完成或关闭任务。
+4. 核心 ASan／UBSan 的既有检测范围与 `detect_leaks=0` 限制保持；不新增 LeakSanitizer、完整 GUI sanitizer 或未执行平台的通过声明。
+
+
+## 第八轮：Wayland 实际鼠标熵验证完成
+
+检查子代理已直接核对 `.tmp/wayland-diagnosis/{22.04,24.04}/scan-success/input.log`、各自 `environment.txt`，查看两张 `generated.png`，并读取独立诊断报告 [wayland-input.md](wayland-input.md)。本轮只追加质量记录，没有修改产品代码、打包产物或既有 QtTest。
+
+| 目标 | 实际 Wayland 输入链结果 | 证据 |
+| --- | --- | --- |
+| Ubuntu 22.04／GCC 11.4.0／Qt 6.8.3 | 外部 XTEST → Weston X11 后端 → Wayland → Qt 主窗，收集 254/254，随后 PG_OK、密钥存在、Ed25519 255 位及公开 SHA256 指纹 | `22.04/scan-success/input.log` 与 `generated.png` |
+| Ubuntu 24.04／GCC 13.3.0／Qt 6.8.3 | 相同实际输入通路，收集 254/254，随后 PG_OK、密钥存在、Ed25519 255 位及独立公开 SHA256 指纹 | `24.04/scan-success/input.log` 与 `generated.png` |
+
+表中证据路径均相对于 `.tmp/wayland-diagnosis/`。两个日志首行都确认 `PLATFORM "wayland" QT 6.8.3`，包含 `spontaneous true` 的原生输入事件及连续的 `PROGRESS 254 254`、`PROGRESS 1000 1000`、`RESULT 0 true 3 255`。截图显示实际成钥后的公钥、指纹和可用保存操作。两次独立驱动均退出 0；驱动仅观察现有产品窗口及信号，不直接填充熵或调用核心生成替代 GUI 流程。
+
+诊断驱动的 Ubuntu 22.04 CMake 是 3.30.9，Ubuntu 24.04 是 3.28.3，后者只链接对应发行版已构建的正式静态库；此诊断工具版本不改变第七轮两份正式发布包均使用 CMake 3.30.9 的记录。
+
+### 更新后的质量边界
+
+- 解除此前“Wayland 实际鼠标熵待验证”：两个 Ubuntu 的实际 Wayland 输入、限速收集及后台成钥链路已验证成功。结合既有嵌套环境精选测试、XCB 完整测试、两平台 Release CTest，以及无 Qt SDK 的三后端安装包启动验证，本期 Linux 自动化与实际输入证据已具备。
+- 不把独立输入驱动和嵌套精选测试拼写为“原 QtTest Wayland 16/16 通过”。原 `QTest::mouseMove` 的 Wayland 指针 warp 限制仍然存在，相应旧失败日志完整保留，既有测试没有删除、跳过或改报通过。
+- 真实输入来自嵌套合成器的外部事件注入，验证范围包含原生事件链与产品实际处理；仍不能替代用户在完整 GNOME／KDE 桌面用硬件鼠标进行的人工体验验收。
+- 剩余完整验收项目是 Windows 原生 MSVC／Qt GUI 构建、Windows ZIP 及 Windows 10／11 实际运行、固定原版 Windows GUI 的人工逐项比对，以及真实用户桌面人工操作。GitHub Actions 尚未实际运行，MinGW 核心交叉编译仍仅是辅助证据。没有剩余已知未修复的产品代码缺陷；本次代码审查收束，但整体跨平台任务继续保留上述未完成验收状态。

@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/upstream.md", "reason": "已核实的上游来源、校验与 GUI/核心边界"}
+{"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/gui-parity.md", "reason": "完整 GUI 功能与原版文件锚点，必须覆盖 G01–G15"}
+{"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/gui-architecture.md", "reason": "Qt 官方依据、平台兼容与 C 核心复用契约"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 C/Qt/线程/文件边界及唯一契约"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "优先复用原版实现，按钮与菜单共用业务处理"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "实施中建立的核心句柄、错误与线程契约"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "实施中建立的Qt状态、语言与后台生命周期契约"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}

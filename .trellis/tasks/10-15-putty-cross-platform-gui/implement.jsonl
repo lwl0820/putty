@@ -11,3 +11,5 @@
 {"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md", "reason": "实际 Ubuntu Actions 失败链与固定 Qt 6.8.3 源码依据"}
 {"file": ".trellis/spec/backend/private-file-permissions.md", "reason": "Windows 私钥新建与覆盖的所有者、受保护 DACL、失败保留内容契约"}
 {"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/windows-private-acl.md", "reason": "微软与 Win32-OpenSSH 官方依据，句柄移交、CRT 模式及 SMB 兼容边界"}
+{"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/archlinux-packaging.md", "reason": "Arch 原生包、系统 Qt、非 root makepkg、pacman 与图形后端验证的官方依据"}
+{"file": ".trellis/spec/backend/arch-package.md", "reason": "Arch HEAD源码、非root构建、系统Qt安装、包元数据与三后端隔离验证契约"}

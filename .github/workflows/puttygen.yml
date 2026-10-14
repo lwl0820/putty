@@ -105,6 +105,43 @@ jobs:
             .tmp/build/release/Testing/Temporary/LastTest.log
             .tmp/package-smoke-reports/
 
+  archlinux:
+    name: Arch Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备临时目录与 Arch 镜像
+        run: |
+          mkdir -p .tmp/temp .tmp/packages/arch
+          docker pull archlinux:base-devel
+          docker pull archlinux:base
+          docker image inspect archlinux:base-devel archlinux:base --format '{{.Id}}' > .tmp/packages/arch/容器镜像.txt
+      - name: 使用普通用户构建并测试 Arch 原生包
+        run: |
+          docker run --rm -e BUILDER_UID="$(id -u)" -v "$PWD:/work" -w /work archlinux:base-devel bash -c '
+            set -euo pipefail
+            export TMPDIR=/work/.tmp/temp
+            pacman -Syu --noconfirm --needed git python cmake ninja qt6-base qt6-translations hicolor-icon-theme noto-fonts-cjk openssh desktop-file-utils
+            useradd --uid "$BUILDER_UID" --home-dir /work/.tmp/arch-home --create-home builder
+            install -d -o builder -g builder .tmp/arch-package .tmp/packages/arch
+            runuser -u builder -- python apps/puttygen/packaging/arch/build_arch.py
+          '
+      - name: 在独立干净 Arch 容器验证安装启动与卸载
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work archlinux:base \
+            bash apps/puttygen/packaging/arch/smoke_arch.sh
+      - name: 单独暂存冒烟检查报告
+        if: always()
+        run: python3 apps/puttygen/packaging/collect_smoke_reports.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: puttygen-gui-archlinux-x86_64
+          path: |
+            .tmp/packages/arch/
+            .tmp/package-smoke-reports/
+
   windows:
     name: Windows MSVC 2022 x64
     runs-on: windows-2022

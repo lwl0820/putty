@@ -11,3 +11,5 @@
 {"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md", "reason": "核对 runner 损坏 Clang 配置的复现、修复及验证范围"}
 {"file": ".trellis/spec/backend/private-file-permissions.md", "reason": "核验产品私钥 ACL 修复及未经测试脚本补权限的原生 OpenSSH 互操作"}
 {"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/windows-private-acl.md", "reason": "核对权限顺序、实际 ACL、资源所有权与 Windows API 兼容性"}
+{"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/archlinux-packaging.md", "reason": "Arch 原生包、系统 Qt、非 root makepkg、pacman 与图形后端验证的官方依据"}
+{"file": ".trellis/spec/backend/arch-package.md", "reason": "Arch HEAD源码、非root构建、系统Qt安装、包元数据与三后端隔离验证契约"}

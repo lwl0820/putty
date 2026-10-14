@@ -10,6 +10,8 @@
 
 修改私钥文件保存或 Windows 平台适配时，还需阅读 [private-file-permissions.md](private-file-permissions.md)。
 
+修改 Arch Linux 原生包、系统 Qt 安装或对应 Actions 时，还需阅读 [arch-package.md](arch-package.md)。
+
 ## 质量检查
 
 按 [error-handling.md](error-handling.md) 的接口、错误和测试契约检查。运行当前工程 CTest，并将本机、目标系统构建、图形后端测试和人工桌面验收分别记录。

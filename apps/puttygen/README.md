@@ -2,9 +2,9 @@
 
 为 Windows 和 Linux 提供 PuTTYgen 图形密钥工具。以官方 PuTTY 0.85 密钥核心为基础，使用 Qt Widgets；界面中英双语，首次启动默认中文。
 
-目标系统为 Windows 10（1809 及以后）/11 x64、Ubuntu 22.04/24.04 x64。功能覆盖目标是原版 Windows PuTTYgen GUI，包括全部算法、素数策略、强素数、PPK/KDF 参数、格式转换和证书。平台与功能的实际验证情况以任务验收记录为准；提供构建脚本不表示对应平台已经验收通过。
+目标系统为 Windows 10（1809 及以后）/11 x64、Ubuntu 22.04/24.04 x64，以及 Arch Linux x86_64（滚动更新）。功能覆盖目标是原版 Windows PuTTYgen GUI，包括全部算法、素数策略、强素数、PPK/KDF 参数、格式转换和证书。平台与功能的实际验证情况以任务验收记录为准；提供构建脚本不表示对应平台已经验收通过。
 
-Windows 发布 ZIP 解压后双击 `puttygen-gui.exe`。Ubuntu 使用与系统版本一致的 DEB 安装，从应用菜单打开“PuTTYgen 密钥工具”。发布包包含匹配的 Qt 动态库；普通用户无需安装开发工具。Ubuntu 包管理器会安装声明的系统运行依赖。
+Windows 发布 ZIP 解压后双击 `puttygen-gui.exe`。Ubuntu 使用与系统版本一致的 DEB 安装，从应用菜单打开“PuTTYgen 密钥工具”。Windows/Ubuntu 发布包包含匹配的 Qt 动态库；普通用户无需安装开发工具。Ubuntu 包管理器会安装声明的系统运行依赖。Arch 从 Actions 下载 `.pkg.tar.zst` 后使用 `sudo pacman -U <包文件>` 安装，使用发行版的 Qt 6（最低 6.8）、翻译与字体依赖，不私带 Qt。
 
 开发构建要求 CMake 3.24 以上、Ninja、C99/C++17 编译器、Qt 6.8 以上的 Widgets 与 Test 开发模块。在仓库根目录执行，所有中间文件放在根目录 `.tmp/`：
 

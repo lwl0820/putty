@@ -5,6 +5,21 @@ if(NOT TARGET puttygen-gui)
 endif()
 include(GNUInstallDirs)
 option(PUTTYGEN_RELEASE_PACKAGING "使用锁定的 Qt 生成完整发布包" OFF)
+option(PUTTYGEN_ARCH_PACKAGING "使用 Arch 系统 Qt 与标准系统安装目录" OFF)
+if(PUTTYGEN_ARCH_PACKAGING)
+    if(PUTTYGEN_RELEASE_PACKAGING)
+        message(FATAL_ERROR "Arch 系统包与 Qt 便携部署模式不能同时开启")
+    endif()
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT EXISTS "/etc/arch-release" OR
+       NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "Arch 系统包须在 Arch Linux x86_64 中构建")
+    endif()
+    if(NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr" OR NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+        message(FATAL_ERROR "Arch 系统包须使用 Release 构建与 /usr 安装前缀")
+    endif()
+    set(CMAKE_INSTALL_BINDIR "bin")
+    set(CMAKE_INSTALL_DATADIR "share")
+endif()
 set(PUTTYGEN_QT_SOURCE_MATERIAL "${Qt6_DIR}/../../../share/puttygen-gui/qt-sources"
     CACHE PATH "Qt 完整许可证与已校验源码目录")
 
@@ -52,7 +67,7 @@ if(PUTTYGEN_RELEASE_PACKAGING)
     endif()
 endif()
 
-if(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE AND NOT PUTTYGEN_ARCH_PACKAGING)
     set_target_properties(puttygen-gui PROPERTIES
         INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
         INSTALL_RPATH_USE_LINK_PATH FALSE)
@@ -117,6 +132,19 @@ if(PUTTYGEN_RELEASE_PACKAGING)
     configure_file("${PUTTYGEN_SOURCE_DIR}/packaging/verify_runtime.cmake.in"
         "${PUTTYGEN_BINARY_DIR}/verify_runtime.cmake" @ONLY)
     install(SCRIPT "${PUTTYGEN_BINARY_DIR}/verify_runtime.cmake")
+endif()
+
+if(PUTTYGEN_ARCH_PACKAGING)
+    # Arch 由 pacman 管理系统 Qt，不部署私有共享库、插件或 qt.conf。
+    set_target_properties(puttygen-gui PROPERTIES INSTALL_RPATH "" INSTALL_RPATH_USE_LINK_PATH FALSE)
+    configure_file("${PUTTYGEN_SOURCE_DIR}/packaging/puttygen-gui.desktop.in"
+        "${PUTTYGEN_BINARY_DIR}/puttygen-gui.desktop" @ONLY)
+    install(FILES "${PUTTYGEN_BINARY_DIR}/puttygen-gui.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+    install(FILES "${PUTTYGEN_SOURCE_DIR}/packaging/puttygen-gui.svg"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
+    # makepkg 负责 Arch 元数据与压缩格式，不产生容易混淆的开发 CPack 归档。
+    return()
 endif()
 
 set(CPACK_PACKAGE_NAME "puttygen-gui")

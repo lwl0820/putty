@@ -6,7 +6,7 @@
 
 - 密钥处理与行为基线：官方 PuTTY 0.85，归档 SHA256 为 `13fd4db2936d03b73812a7bcc2a658e4dd29cc776a56c3670a7fc6f1a0ee8af8`。
 - GUI：Qt 6 Widgets，C++17；密码适配层与上游保持 C99，避免将不兼容的上游 C 头直接包含进 C++。
-- 发布兼容性构建：Qt 6.8.3 公开源码作为可复现的初始基线；仅依赖 6.8 已有 API。发行前检查适用补丁并固定最终版本和校验，不随本机 Qt 自动变更发布依赖。
+- Windows／Ubuntu 发布兼容性构建：Qt 6.8.3 公开源码作为可复现的初始基线；仅依赖 6.8 已有 API。发行前检查适用补丁并固定最终版本和校验，不随本机 Qt 自动变更发布依赖。Arch 原生包使用该发行版系统 Qt 6.8 以上，按滚动仓库的运行依赖管理。
 - 本机检测到 Qt Core/Widgets/Test 6.12.0 和 CMake 4.4.4，可供后续开发冒烟；它们不是 6.8 发布兼容验证的替代。
 - Windows 使用 MSVC 2022 x64，Linux 分别在 Ubuntu 22.04/GCC 11 和 Ubuntu 24.04/GCC 13 环境构建；CMake 3.24 以上，Ninja。
 
@@ -20,11 +20,11 @@
 | `apps/puttygen/src/app/`、`apps/puttygen/src/ui/` | Qt 单工作线程、公开会话、语言偏好、主窗及各对话框。 |
 | `apps/puttygen/resources/` | 嵌入式 JSON 翻译、图标、离线帮助与许可引用。 |
 | `apps/puttygen/tests/` | 组件核心互操作和 GUI 交互；构建哈希隔离的测试产物仍位于仓库 `.tmp/`。 |
-| `apps/puttygen/cmake/`、`apps/puttygen/packaging/` | 该组件的 Windows ZIP、Ubuntu DEB 和安装验证。 |
+| `apps/puttygen/cmake/`、`apps/puttygen/packaging/` | 该组件的 Windows ZIP、Ubuntu DEB、Arch PKGBUILD 和安装验证。 |
 | `vendor/putty/`、`vendor/patches/` | 套件共享的固定上游源码、原许可证和可追溯最小补丁。 |
 | `cmake/UpstreamPuTTY.cmake` | 公共上游密码与密钥静态目标接入。 |
 | `tools/qt/`、`tools/ubuntu-build-dependencies.sh` | Qt 来源锁、构建与许可收集，以及共享构建环境依赖。 |
-| `.github/workflows/puttygen.yml` | 本期组件三平台构建、测试和发布包检查。 |
+| `.github/workflows/puttygen.yml` | 本期组件 Windows、两 Ubuntu 与 Arch 的构建、测试和发布包检查。 |
 | `docs/`、`README.md` | 套件结构与公共构建指南；组件自身使用说明放组件 README。 |
 | `.tmp/` | 仓库唯一开发临时根，下载、构建、测试和打包暂存均置于此处。 |
 
@@ -86,6 +86,8 @@ flowchart LR
 - 上游源码和 Qt 依赖版本/校验应记录，补丁单独可追溯。Qt 动态链接，发布相应许可、第三方通知和源码获取信息；验证实际模块的许可材料。
 - Windows ZIP 包含程序、匹配版本 Qt DLL、平台插件、必要运行库与帮助资源，双击可运行。
 - Ubuntu 22.04 与 24.04 分别构建 DEB 包；Qt 库和插件使用经过该发行版验证的版本或构建，声明实际系统依赖。安装后从桌面入口启动，卸载只移除本程序。
+- Arch x86_64 在独立 Arch 环境中由普通用户执行 `makepkg`，使用当前检出源码生成 `.pkg.tar.zst` 与 SHA256；程序安装到 `/usr/bin`，桌面入口、图标和许可按系统目录安装，由 pacman 管理 Qt 运行依赖。该分支不部署私有 Qt、`/opt` 包装器或指向私有库的 RPATH，不复用 Ubuntu 二进制。
+- Arch Actions 执行核心与 GUI 自动测试，并在隔离环境验证 pacman 安装、offscreen／XCB／Wayland 启动及卸载；报告通过宿主收集器上传到独立报告目录。包、校验和与环境版本记录一并提供，滚动环境结果不能被表述为固定发行版永久兼容承诺。
 - Linux 的 X11/Wayland、文件对话框、剪贴板、鼠标移动和高 DPI 均纳入实际桌面验收；无显示环境的测试不代替真实桌面验收。
 - 所有构建目录、缓存、测试运行根与打包暂存显式放到项目 `.tmp/`，并通过测试环境变量/测试夹具覆盖默认临时目录。
 

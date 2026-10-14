@@ -60,7 +60,15 @@
 
 ## 当前验证边界
 
-迁移后的本机开发构建与两目标 Ubuntu 的 Qt 6.8.3 Release 均完成 CTest 3/3；两个最终 DEB 已在无 Qt SDK 的对应干净系统通过 offscreen、XCB、Wayland 安装/启动/卸载。XCB 两平台 GUI 均 16 项通过。Windows x64 核心仅交叉编译/链接通过，没有运行 Windows 程序；原生 Actions 尚待仓库提交与可用认证。真实 Windows 桌面、与原版程序的人工操作核查、Linux 完整桌面人工验收仍未完成，任务保持 `in_progress`。两 Ubuntu 的 Wayland 另通过独立真实鼠标输入驱动完成熵收集与 Ed25519 生成；Ubuntu 22.04 带 seat 的嵌套 Wayland 其余 15 项 GUI 测试通过。原 QtTest 指针 warp 不受 Wayland 支持，未将其原始完整运行写为通过。准确结果见质量及输入研究记录；自动化嵌套环境仍不替代真实用户桌面人工验收。
+用户追加 Arch Linux Actions 包发布，本轮新增下列实施验收；未取得证据前不勾选，也不改写此前 Ubuntu／Windows 结果：
+
+- [x] 独立 Arch x86_64 job 使用普通用户 makepkg，从当前检出源码生成原生 `.pkg.tar.zst` 与 SHA256。
+- [x] 系统 Qt 安装分支提供 `/usr/bin` 程序、桌面入口、图标与许可，运行依赖交由 pacman 管理。
+- [x] Arch 构建通过核心／互操作／GUI 自动测试，包内容不包含开发目录、测试密钥或私有 Qt。
+- [x] 隔离 Arch 验证安装、offscreen／XCB／Wayland 启动及卸载；报告由独立目录上传。
+- [x] Actions 接线、文档和规范完成独立复核，真实远端结果另行确认。
+
+迁移后的本机开发构建与两目标 Ubuntu 的 Qt 6.8.3 Release 均完成 CTest 3/3；两个最终 DEB 已在无 Qt SDK 的对应干净系统通过 offscreen、XCB、Wayland 安装/启动/卸载。XCB 两平台 GUI 均 16 项通过。Windows 已有用户提供的原生 CTest 2/3 日志：核心往返和 GUI 通过，互操作因私钥权限失败；相应修复 fc024eb 与报告上传修复 084e5c8 均已推送，修复后的完整远端结果尚未核实。真实 Windows 桌面、与原版程序的人工操作核查、Linux 完整桌面人工验收仍未完成，任务保持 `in_progress`。两 Ubuntu 的 Wayland 另通过独立真实鼠标输入驱动完成熵收集与 Ed25519 生成；Ubuntu 22.04 带 seat 的嵌套 Wayland 其余 15 项 GUI 测试通过。原 QtTest 指针 warp 不受 Wayland 支持，未将其原始完整运行写为通过。准确结果见质量及输入研究记录；自动化嵌套环境仍不替代真实用户桌面人工验收。
 
 详细证据见 [质量检查记录](research/quality-review.md)。阶段勾选表示该项实现与已具备的检查完成，不表示上述未运行平台已通过。
 

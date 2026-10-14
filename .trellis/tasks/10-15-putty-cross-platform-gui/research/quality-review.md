@@ -252,3 +252,28 @@
 - 另外针对项目已有真实冒烟树独立执行收集。`.tmp/package-smoke/puttygen-gui-0.1.0-ubuntu24.04-amd64/offscreen/runtime` 属于 UID 65534、权限 `0700`，普通审查进程直接遍历被拒绝；收集器成功复制 18 份报告到当前用户新建暂存目录，全部可递归读取且逐字节与原报告一致。前后运行目录 UID 与权限均未变。证据 `.tmp/smoke-reports-review-verification.json`，与实施代理既有 `.tmp/smoke-reports-permissions-regression.json` 结果一致。
 - 两份新增 Python 文件通过 Python 3.11 语法兼容解析；YAML 解析及两平台“收集→上传”、`always()`、上传路径和失败保留检查通过。仓库没有独立 Python lint／静态类型检查配置，不将语法检查记为专用 lint 或类型检查通过。`git diff --check` 通过。
 - 本轮仅检查报告收集与 CI 接线，没有重编 Qt、重跑无关核心矩阵或执行修改后的 GitHub Actions。远端 runner 的最终上传与新一轮 Windows 原生结果仍待实际运行；本机回归不替代上述远端状态，也不改变整体桌面人工验收边界。任务保持 `in_progress`。
+
+## 第十三轮：Arch Linux 原生包与独立 Actions 产物
+
+用户追加在 Actions 发布 Arch Linux 包，本轮按新的 PRD 范围加入 x86_64 滚动系统包；没有引入 AUR、托管 pacman 仓库或 GitHub Release 发布，也没有变更 PuTTYgen 功能范围。
+
+### 实现与独立审查
+
+- 新 Arch job 在官方 `archlinux:base-devel` 容器安装构建依赖，随后以与宿主 runner 相同 UID 的普通账户运行 `build_arch.py`／makepkg。源码归档白名单、版本和 PKGBUILD 都来自同一 HEAD，源码 SHA256 交由 makepkg 实际校验；产物路径来自 `--packagelist`，要求唯一应用包，不使用包通配符挑选历史文件。
+- CMake 的 `PUTTYGEN_ARCH_PACKAGING` 分支仅允许 Arch x86_64、Release 和 `/usr`，与锁定 Qt 的便携部署互斥。直接安装 ELF、desktop、SVG、文档及许可，由 pacman 管理系统 Qt、翻译、运行库和中文字体；不复制私有 Qt、`qt.conf`、`/opt` 包装器或 RPATH。Windows／Ubuntu 原有 job、Qt 版本检查、部署与冒烟命令未改动。
+- 独立 `archlinux:base` 容器通过 `pacman -U` 安装包声明的运行依赖。验证实际包元数据、安装文件、ELF、ldd、无 RPATH 与 desktop 后，分别启动 offscreen、XCB、Wayland；启动错误仍向 job 传播，已安装应用在 `finally` 中卸载，并检查残留。容器安装操作没有在宿主执行。
+- Arch 收集和上传步骤均保留 `always()`；上传包目录及独立报告目录，不递归上传含私有 runtime 的源树。构建指南、组件说明、PRD、设计及 Arch 包规范已经同步。检查子代理未发现需要自修的产品代码或接线缺陷。
+
+### 验证证据
+
+- 实施代理在宿主 Arch 以普通用户完成真实 makepkg、Release 构建与 CTest 3/3，总计 10.31 秒（核心 2.25 秒、互操作 2.29 秒、GUI 5.77 秒）；独立审查直接读取 `.tmp/arch-validation/build.log`、包内 `.PKGINFO`、实际文件清单和对应源码归档。测试环境为 Qt 6.12.0-2、GCC 16.2.1、CMake 4.4.4、Python 3.14.8，不是 Windows／Ubuntu 的 Qt 6.8.3 证据。
+- 真实包为 `puttygen-gui-0.1.0-1-x86_64.pkg.tar.zst`，SHA256 `92c77a183551239017ca40314cb120117adfaf79b6e930fbca2a3d5fd1c124a4`，版本、架构和七个声明的运行依赖均经独立核验。包 SHA256 旁文件、源码 SHA256、临时测试仓库提交与构建记录一致；源码不含 `.git`、`.trellis`、`.agents` 或 `.tmp`。包内安装树没有测试程序、源码构建目录或 Qt 副本。
+- 实施代理先在新建 `base-devel` 容器验证三后端，再使用实际 workflow 的最小 `archlinux:base` 镜像验证三后端安装／启动／卸载，分别记录在 `smoke.log`、`smoke-base.log`。检查子代理直接核对后者三份成功记录及日志中由 `pacman -U` 安装 `qt6-base 6.12.0-3` 的事务，未把预装构建 SDK 当运行依赖检查。
+- 检查子代理以普通用户将真实 Arch 冒烟树中的十份报告复制到 `.tmp/arch-review-reports/`，全部可遍历和读取，三后端结果的包 SHA256 一致；运行时、账户配置与 socket 未被复制，原 `0700` 目录保持。此检查继续覆盖此前 Ubuntu 上传权限故障的边界。
+- 检查子代理独立执行打包轻量回归，12/12 通过，包括新增 Arch 元数据、缺少安装文件、私有部署与源码杂项拒绝，以及既有报告权限／失败／路径回归。`bash -n`、两份 Python 的 Python 3.11 语法兼容解析、YAML 与 Arch 的 `always()`／上传路径接线、`git diff --check` 均通过。仓库没有独立 Python lint／静态类型检查配置，未将语法检查写为专用 lint 或类型检查通过。
+
+### 本轮证据边界
+
+- 未提交代码的完整构建使用项目 `.tmp/arch-validation/source` 临时 Git 夹具，提交 `b17aaf2388f7ea4586740793d200b81297e7b107`；没有用尚不含 Arch 实现的原仓库 HEAD 冒充新源码。构建使用的 `Packaging.cmake` 与 PKGBUILD 和最终文件逐字节一致。首次完整构建后，编排及冒烟脚本补充环境版本记录与容器验证细节，归档内这些脚本不是最终版本，不能将旧源码归档表述为最终提交的完整发布物。
+- 最终 `smoke_arch.py`／`.sh` 已在上述两个干净容器实际执行。最终 `build_arch.py` 的受控编排检查实际执行 Git 归档、同提交配方读取、`makepkg --packagelist`、pacman 版本查询和产物／日志复制，但明确复用已验证的包，没有再次完整编译；证据 `final-orchestration.log`。构建容器前置依赖、普通用户 `makepkg --verifysource`／`--packagelist` 另有 `build-container-preflight.log`。检查子代理核对 `.tmp/arch-validation/最终文件SHA256.json` 的七个最终关键文件均与工作区一致。
+- 新增 job 尚未作为最终提交在远端 Actions 执行，最终 artifact 上传结果与真实 Arch 桌面人工体验仍须分别确认；不把宿主构建、容器预检与受控编排拼写为完整远端流水线通过。本轮没有重复编译固定 Qt 或运行无关平台矩阵，整体任务保持 `in_progress`。

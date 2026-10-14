@@ -32,4 +32,6 @@ cmake --build .tmp/build/suite-only
 | `.github/workflows/puttygen.yml` | PuTTYgen 的平台构建和发布包检查 |
 | `.tmp/` | 下载、构建、测试及打包暂存 |
 
+Actions 同时提供 Windows ZIP、两个 Ubuntu DEB 和 Arch Linux x86_64 的 `.pkg.tar.zst` 原生包；Arch 包使用系统 Qt，由 pacman 安装运行依赖。
+
 发布与平台验证见 [构建与发布](docs/构建与发布.md)，依赖来源见 [第三方软件与来源](THIRD_PARTY_NOTICES.md)。所有开发中间文件使用根目录 `.tmp/`。来源关系和校验保存在 [上游来源](vendor/来源.md)，自有代码许可证位于 [LICENSE](LICENSE)。

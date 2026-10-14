@@ -4,24 +4,37 @@
 import argparse
 from pathlib import Path
 import shutil
+import stat
 
 
 ROOT = Path(__file__).resolve().parents[3]
 TEMPORARY_ROOT = ROOT / ".tmp"
 PLATFORMS = ("offscreen", "xcb", "wayland", "native")
 REPORTS = ("结果.json", "启动输出.txt", "动态库.txt")
+# 与 Ubuntu／Arch 冒烟脚本创建的顶层辅助目录一致；它们不是包目录。
+SOURCE_HELPERS = frozenset(("temp", "wayland-runtime"))
 
 
 def collect(source, destination):
-    if not source.exists():
+    def status(path):
+        # Python 3.14 的 is_file/is_symlink 会吞掉权限错误；只容许报告不存在。
+        try:
+            return path.lstat()
+        except FileNotFoundError:
+            return None
+
+    if status(source) is None:
         return 0
     count = 0
 
     def copy_report(path):
         nonlocal count
-        if path.is_symlink():
+        information = status(path)
+        if information is None:
+            return
+        if stat.S_ISLNK(information.st_mode):
             raise ValueError(f"报告不能是符号链接：{path}")
-        if not path.is_file():
+        if not stat.S_ISREG(information.st_mode):
             return
         target = destination / path.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -32,11 +45,18 @@ def collect(source, destination):
     copy_report(source / "weston.log")
     # 仅枚举包这一层，定点读取报告；不进入 runtime、配置或解压目录。
     for package in sorted(source.iterdir()):
-        if package.is_symlink() or not package.is_dir():
+        # 在任何子路径探测前排除，避免旧版 pathlib 访问 root 的 0700 目录。
+        if package.name in SOURCE_HELPERS:
+            continue
+        information = status(package)
+        if information is None or not stat.S_ISDIR(information.st_mode):
             continue
         for platform in PLATFORMS:
             work = package / platform
-            if work.is_symlink():
+            information = status(work)
+            if information is None:
+                continue
+            if stat.S_ISLNK(information.st_mode):
                 raise ValueError(f"报告目录不能是符号链接：{work}")
             for report in REPORTS:
                 copy_report(work / report)

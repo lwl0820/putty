@@ -108,10 +108,11 @@ python -B -m unittest discover -s apps/puttygen/packaging/tests -v
 ### 3. 路径、身份与退出状态契约
 
 - 宿主 runner 在上传前通过 `if: always()` 运行收集器，Windows 同样使用独立报告目录。
-- 源端仅枚举第一层包目录，定点读取 `offscreen`、`xcb`、`wayland`、`native` 下的 `结果.json`、`启动输出.txt`、`动态库.txt`，以及源根的 `weston.log`。不递归运行目录，不复制 socket、解压包、账户配置或测试私钥。
+- 源端仅枚举第一层包目录，定点读取 `offscreen`、`xcb`、`wayland`、`native` 下的 `结果.json`、`启动输出.txt`、`动态库.txt`，以及源根的 `weston.log`。`temp`、`wayland-runtime` 为辅助目录，必须在探测子路径前排除；不能把根目录的合成器运行目录当成包目录。不递归运行目录，不复制 socket、解压包、账户配置或测试私钥。
 - 目标保留包名与平台层级，使用内容复制创建当前 runner 可读取的报告，不继承容器文件的所有者与权限。
 - 上传路径为 `.tmp/package-smoke-reports/`；DEB／ZIP、SHA256 和 CTest 日志保留各自原路径。两平台不得残留 `.tmp/package-smoke/**` 上传模式。
 - 原冒烟步骤的非零状态继续使任务失败；报告收集不能伪造成功结果。运行时目录维持 `0700`，既有 Wayland 目录继续连接原合成器。
+- 真正的源目录、包目录、平台目录及报告使用会传播权限错误的 `lstat()` 状态查询，只将 `FileNotFoundError` 视为尚未生成；不依赖 Python 3.14 会吞掉系统错误的 `is_file()` 等便捷查询，避免真实报告因父目录不可访问而被漏报。
 
 ### 4. 校验与错误矩阵
 
@@ -129,7 +130,9 @@ python -B -m unittest discover -s apps/puttygen/packaging/tests -v
 
 ### 6. 必需验证
 
-回归使用不同 UID 或实际无读取权限的子目录复现旧扫描的 `EACCES`，确认收集器能保留报告内容、包与平台区分，并且普通用户能递归读取目标树。覆盖部分失败日志、尚无源目录、收集错误传播及未复制运行时内容。检查 Ubuntu 和 Windows 工作流均接入收集步骤，且 `always()`、原测试退出码与安装／卸载验证保留。此修复不需要重编 Qt 或重复无关密钥矩阵。
+回归使用不同 UID 或实际无读取权限的目录复现旧扫描的 `EACCES`，同时覆盖包内运行目录和源根辅助运行目录，确认收集器能保留报告内容、包与平台区分，并且普通用户能递归读取目标树。权限边界必须使用目标 runner 的 Python 版本实际验证：Python 3.14 与旧版本的 `Path.is_file`／`is_symlink` 对系统错误的处理存在差异，不能仅凭新版本下不抛异常判断路径可访问。覆盖部分失败日志、尚无源目录、收集错误传播及未复制运行时内容。检查各平台工作流均接入收集步骤，且 `always()`、原测试退出码与安装／卸载验证保留。此修复不需要重编 Qt 或重复无关密钥矩阵。
+
+版本差异的官方依据：[Python 3.14 路径状态查询变更](https://docs.python.org/3.14/library/pathlib.html#querying-file-type-and-status)、[Python 3.12 符号链接状态查询](https://docs.python.org/3.12/library/pathlib.html#pathlib.Path.is_symlink)。前者开始将操作系统错误统一转换为 `False`，旧版会传播权限错误。
 
 ### 7. 错误与正确做法
 

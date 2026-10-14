@@ -89,6 +89,45 @@ class CollectSmokeReportsTest(unittest.TestCase):
         self.assertEqual(self.scan_reports(), {"包/offscreen/结果.json": "通过"})
         self.assertEqual(runtime.stat().st_mode & 0o777, 0)
 
+    def test_top_level_helpers_are_not_package_reports(self):
+        self.report("包/offscreen/结果.json", "真实包报告")
+        # 即使辅助目录可读且碰巧包含相同文件结构，也不能把它当作包。
+        for helper in ("temp", "wayland-runtime"):
+            self.report(f"{helper}/offscreen/结果.json", "不应上传的辅助文件")
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.scan_reports(), {"包/offscreen/结果.json": "真实包报告"})
+
+    @unittest.skipUnless(os.name == "posix" and os.geteuid() != 0,
+                         "需要普通 POSIX 用户实际触发辅助目录权限拒绝")
+    def test_unreadable_top_level_helpers_are_not_probed_or_changed(self):
+        self.report("包/offscreen/结果.json", "通过")
+        helpers = []
+        for name in ("temp", "wayland-runtime"):
+            helper = self.source / name
+            helper.mkdir(mode=0o700)
+            helper.chmod(0)
+            self.addCleanup(helper.chmod, 0o700)
+            helpers.append(helper)
+            with self.assertRaises(PermissionError):
+                list(helper.iterdir())
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.scan_reports(), {"包/offscreen/结果.json": "通过"})
+        for helper in helpers:
+            self.assertEqual(helper.stat().st_mode & 0o777, 0)
+
+    @unittest.skipUnless(os.name == "posix" and os.geteuid() != 0,
+                         "需要普通 POSIX 用户实际触发报告目录权限拒绝")
+    def test_real_report_directory_permission_failure_is_not_silently_dropped(self):
+        self.report("包/offscreen/结果.json", "通过")
+        directory = self.source / "包/offscreen"
+        directory.chmod(0)
+        self.addCleanup(directory.chmod, 0o755)
+        result = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"PermissionError", result.stderr)
+
     def test_missing_source_is_allowed_after_earlier_build_failure(self):
         self.source.rmdir()
         result = self.invoke()

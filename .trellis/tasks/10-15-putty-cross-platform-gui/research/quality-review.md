@@ -277,3 +277,24 @@
 - 未提交代码的完整构建使用项目 `.tmp/arch-validation/source` 临时 Git 夹具，提交 `b17aaf2388f7ea4586740793d200b81297e7b107`；没有用尚不含 Arch 实现的原仓库 HEAD 冒充新源码。构建使用的 `Packaging.cmake` 与 PKGBUILD 和最终文件逐字节一致。首次完整构建后，编排及冒烟脚本补充环境版本记录与容器验证细节，归档内这些脚本不是最终版本，不能将旧源码归档表述为最终提交的完整发布物。
 - 最终 `smoke_arch.py`／`.sh` 已在上述两个干净容器实际执行。最终 `build_arch.py` 的受控编排检查实际执行 Git 归档、同提交配方读取、`makepkg --packagelist`、pacman 版本查询和产物／日志复制，但明确复用已验证的包，没有再次完整编译；证据 `final-orchestration.log`。构建容器前置依赖、普通用户 `makepkg --verifysource`／`--packagelist` 另有 `build-container-preflight.log`。检查子代理核对 `.tmp/arch-validation/最终文件SHA256.json` 的七个最终关键文件均与工作区一致。
 - 新增 job 尚未作为最终提交在远端 Actions 执行，最终 artifact 上传结果与真实 Arch 桌面人工体验仍须分别确认；不把宿主构建、容器预检与受控编排拼写为完整远端流水线通过。本轮没有重复编译固定 Qt 或运行无关平台矩阵，整体任务保持 `in_progress`。
+
+## 第十四轮：Arch 首次远端发布与辅助运行目录收集修复
+
+### 首次远端结果与故障证据
+
+- 主会话通过 GitHub 公开 API 确认首次 Arch 提交 `d0ba460b4e3b5ccfd966d7ba2320b150b63b072a` 的 [run 38655049591](https://github.com/lwl0820/putty/actions/runs/38655049591)、job `116162709568`：普通用户构建和自动测试成功、独立干净容器安装／启动／卸载成功、上传成功；单独暂存冒烟报告失败，整个 job 结论为 failure。该结果更新上一轮“尚未远端运行”的历史边界，不能将部分成功写成整个 job 通过。
+- 名为 `puttygen-gui-archlinux-x86_64` 的 artifact `11936635901` 已存在，API 摘录尺寸为 3,396,725 字节且未过期。独立检查读取 `.tmp/arch-validation/remote-arch-first-run.json` 核对这些字段；该文件是主会话已读取公开 API 的摘录，不是下载的完整日志，也不代表检查子代理已经下载并解包远端 artifact。
+- 实施代理在 Ubuntu 22.04／Python 3.10.12 和 Ubuntu 24.04／Python 3.12.3，以普通 UID 1000 访问 root 所有的顶层 `wayland-runtime`（0700），精确复现旧收集器 `work.is_symlink()` 对 `wayland-runtime/offscreen` 的 `PermissionError`，两个旧版本均退出 1。检查子代理直接读取 `collector-before-22.04.log`／`collector-before-24.04.log`；这是本机目标版本复现，不能冒充远端完整 traceback。
+
+### 修复与独立审查
+
+- 收集器在任何子路径探测前排除已知辅助目录 `temp`／`wayland-runtime`，不将它们当成包目录。新增即使这些目录可读且带有伪造报告结构也不收集的回归，使测试不依赖 Python 的权限错误表现。
+- 独立审查指出 Python 3.14 路径查询统一将系统错误转换成 False，也会使真正报告的不可遍历父目录被误当成没有报告。实施代理因此将源／包／平台／报告的状态探测改为显式 `lstat`，只容许 `FileNotFoundError` 表示不存在；权限错误继续非零传播，没有宽泛捕获或忽略异常。符号链接边界与真实文件复制错误继续保留。
+- 新增实际不可遍历顶层辅助目录和真正报告目录的回归，保留嵌套 runtime、读取／写入错误及失败日志回归。Arch job 在构建前也运行这组轻量检查；Ubuntu／Windows 的既有检查接线、原生包构建、三后端冒烟及 `always()` 收集／上传保持。
+
+### 验证与边界
+
+- 检查子代理以本机 Python 3.14.8 普通用户独立执行最终打包回归，15/15 通过、0 skipped；另外直接对真实报告平台目录设置不可遍历权限，确认最终收集器抛出 `PermissionError`，不把真正报告缺失静默写为成功。
+- 实施代理在 Python 3.10.12 和 3.12.3 的普通用户／root 0700 夹具上执行最终 CLI：有效报告收集成功，root 辅助目录 UID／权限不变，真报告不可读时仍退出 1。两环境最终轻量回归均 15/15 通过，耗时分别 0.359 秒、0.424 秒；独立审查直接读取 `collector-after-22.04.log`／`collector-after-24.04.log` 核对结果。
+- Python 3.11 语法兼容解析、YAML、Arch 前置测试顺序及 `always()` 接线检查通过；`git diff --check` 通过。没有专用 Python lint／静态类型检查配置，未将语法检查写为这些检查通过。
+- 本轮没有重编 Arch 程序或 Qt，也没有重复无关核心矩阵。首次远端包已生成并上传，但本轮收集修复后的最终远端 job 和完整报告上传仍待重新运行；真实桌面人工验收与整体任务 `in_progress` 状态不变。

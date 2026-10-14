@@ -111,6 +111,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: 检查冒烟报告收集
+        run: python3 -B -m unittest discover -s apps/puttygen/packaging/tests -v
       - name: 准备临时目录与 Arch 镜像
         run: |
           mkdir -p .tmp/temp .tmp/packages/arch

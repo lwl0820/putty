@@ -213,3 +213,23 @@
 - 两系统的 `lrelease`、`lupdate`、`lconvert` 目标构建命令均成功，原生执行前两者报告 6.8.3，`lconvert -help` 正常。最终复验日志显示 Ninja 无需重建；首次采集误用不受支持的 `lconvert -version`，实施代理改为 `-help` 后复验通过，该误参不涉及产品脚本。
 
 实际 Qt 验证证据位于 `.tmp/actions-ubuntu-failure/libclang-regression/{22.04,24.04}/` 的 `old.log`、`features-only.log`、`fixed.log`、`linguist-build.log` 和 `result.json`，驱动为同目录上层的 `verify.py`。本轮没有重编整套 Qt、重跑完整产品矩阵，也没有运行修复后的 GitHub runner；远端 Actions、Windows 原生产品与人工桌面验收仍按真实结果另行确认。
+
+
+## 第十一轮：Windows 私钥文件权限与原生 OpenSSH 互操作
+
+用户的 Windows MSVC Actions 真实结果为 CTest 2/3：核心往返及 GUI 通过，互操作在原生 OpenSSH 读取新导出的私钥时因继承 `BUILTIN\\Users` 权限被拒绝。本轮修复位于产品 Windows `f_open` 私钥写入分支，不在互操作脚本中修补 ACL 或跳过原生检查。
+
+### 修复与审查
+
+- 私钥新建使用当前进程 TokenUser 作为所有者及单条完整权限 ACE，并保护 DACL；覆盖旧文件在同一排他句柄上设置权限并读回核验，再转为 CRT 文件流，最后才截断。权限失败返回文件错误，旧内容不被截断。公钥、读取及 Linux 分支保留原行为。
+- 逐项核对句柄→描述符→文件流的单次所有权移交、失败清理、Win32 到 errno 映射、文本／二进制／追加／读写模式及中文路径；Windows API 仅使用已记录的公开接口，适配库及测试库链接 `advapi32`。未发现需要进一步修改的产品逻辑问题。
+- 新 Windows `core-private-acl` 测试验证实际磁盘 owner、受保护 DACL、单 ACE 和无继承，覆盖 PPK、OpenSSH 自动／新格式及 ssh.com 的新建与覆盖、权限失败保留内容、公钥行为及文件模式。审查补充新建路径权限失败断言：报告 `PG_ERR_IO`／`EACCES`，仅留下受保护的零字节文件；SID／ACL 测试缓冲改为 DWORD 存储以保证 API 对齐约定。
+- 新增的权限失败 hook 仅由 `PG_TESTING` 编译。检查子代理使用 MinGW `nm` 核验生产 `libpg-core.a` 无 `pg_test_*` 定义，测试库包含权限失败 hook。互操作脚本保持未修改，原有读取、公钥、签名与证书验证继续启用。
+- 构建指南及 Windows 私钥权限规范、规范索引和任务上下文已同步；本次产品修复不进入 vendor，不改变公共 `pg_core.h` ABI。
+
+### 验证与边界
+
+- 实施代理在既有 Ubuntu 24.04 离线构建镜像中完成 MinGW x64 Release 核心、测试库及两个测试 EXE 编译／链接，日志 `.tmp/windows-acl-cross.log`。检查子代理在补充断言及对齐修正后独立重编 `pg-private-acl-tests.exe` 成功，没有编译警告；这只是 Windows 辅助编译证据，没有执行 Windows 程序。
+- 检查子代理读取 `.tmp/build/gui-dev/Testing/Temporary/LastTest.log` 确认本轮 Linux Debug CTest 3/3 通过：核心及互操作合计 8.05 秒、GUI 5.75 秒，共 13.80 秒；GUI QtTest 16 passed、0 failed、0 skipped。该开发构建使用本机 Qt 6.12，不代替 Windows 或发布 Qt 6.8.3 的运行证据。
+- `git diff --check` 通过；C99 编译／链接检查通过。仓库没有独立 C lint 或静态类型检查配置，不将这些检查记为专用 lint／类型检查通过。
+- 修复后的 Windows 原生 MSVC、权限测试、OpenSSH 互操作及 ZIP 仍须由 Actions 重新运行；不能将此次交叉编译记为原生 ACL／签名验证通过。任务继续保持 `in_progress`，完整桌面人工验收边界不变。

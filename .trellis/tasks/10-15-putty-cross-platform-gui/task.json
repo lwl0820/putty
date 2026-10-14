@@ -30,8 +30,9 @@
     ".trellis/tasks/10-15-putty-cross-platform-gui/research/quality-review.md",
     ".trellis/tasks/10-15-putty-cross-platform-gui/research/wayland-input.md",
     ".trellis/tasks/10-15-putty-cross-platform-gui/research/commit-plan.md",
-    ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md"
+    ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md",
+    ".trellis/tasks/10-15-putty-cross-platform-gui/research/windows-private-acl.md"
   ],
-  "notes": "三批本地提交已完成，并按用户要求整合到main。Windows标准流中文编码修复ba44106已推送。用户继续提供Ubuntu Actions失败日志：Qt Tools可选Clang探测加载runner不完整Clang导出配置，缺失libclangBasic.a。本轮禁用不需要的Clang包发现并补回归，保留Linguist；修复后的原生Actions完整结果仍待确认。已有Ubuntu本地验证保留；Windows构建、打包、原版GUI人工比对与完整用户桌面验收未完成。保持in_progress，不归档。",
+  "notes": "已按用户要求整合到main，Windows编码修复ba44106及Ubuntu可选Clang探测修复a558665均已在远端。用户新提供Windows CTest日志：core-roundtrip与gui-interactions通过，core-interop因导出私钥继承BUILTIN\\Users访问权限被原生OpenSSH拒绝。本轮在产品Windows私钥写入边界修复受保护ACL及失败保留内容，并增加回归；修复后的原生Actions完整结果待确认。已有Ubuntu本地验证保留，Windows ZIP、原版GUI人工比对和完整用户桌面验收尚未完成。保持in_progress，不归档。",
   "meta": {}
 }

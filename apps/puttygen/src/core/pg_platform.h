@@ -5,6 +5,9 @@ int pg_platform_random(void *data, size_t size);
 int pg_platform_seed(void);
 #ifdef PG_TESTING
 void pg_test_random_failure(int fail);
+#ifdef _WIN32
+void pg_test_private_security_failure(int fail);
+#endif
 #endif
 
 #ifdef PG_TESTING

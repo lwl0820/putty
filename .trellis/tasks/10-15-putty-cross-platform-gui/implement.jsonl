@@ -9,3 +9,5 @@
 {"file": ".trellis/spec/frontend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
 {"file": ".trellis/spec/backend/build-tools.md", "reason": "遵守标准流编码及 Qt Tools 可选 Clang 包发现契约"}
 {"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md", "reason": "实际 Ubuntu Actions 失败链与固定 Qt 6.8.3 源码依据"}
+{"file": ".trellis/spec/backend/private-file-permissions.md", "reason": "Windows 私钥新建与覆盖的所有者、受保护 DACL、失败保留内容契约"}
+{"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/windows-private-acl.md", "reason": "微软与 Win32-OpenSSH 官方依据，句柄移交、CRT 模式及 SMB 兼容边界"}

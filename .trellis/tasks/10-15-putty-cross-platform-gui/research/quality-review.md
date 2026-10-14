@@ -182,3 +182,15 @@
 - 不把独立输入驱动和嵌套精选测试拼写为“原 QtTest Wayland 16/16 通过”。原 `QTest::mouseMove` 的 Wayland 指针 warp 限制仍然存在，相应旧失败日志完整保留，既有测试没有删除、跳过或改报通过。
 - 真实输入来自嵌套合成器的外部事件注入，验证范围包含原生事件链与产品实际处理；仍不能替代用户在完整 GNOME／KDE 桌面用硬件鼠标进行的人工体验验收。
 - 剩余完整验收项目是 Windows 原生 MSVC／Qt GUI 构建、Windows ZIP 及 Windows 10／11 实际运行、固定原版 Windows GUI 的人工逐项比对，以及真实用户桌面人工操作。GitHub Actions 尚未实际运行，MinGW 核心交叉编译仍仅是辅助证据。没有剩余已知未修复的产品代码缺陷；本次代码审查收束，但整体跨平台任务继续保留上述未完成验收状态。
+
+## 第九轮：Windows Actions 的 Python 标准流编码
+
+用户提供了实际 Windows Actions 失败日志：Python 3.11.9 在 `tools/qt/build_qt.py::run` 输出“执行：”时，因重定向标准流采用 cp1252 而触发 `UnicodeEncodeError`。这取代此前“Actions 尚未实际运行”的状态，但不代表 Windows 产品构建或运行已通过。
+
+- 修复入口在参数解析前将可重配的 `stdout`／`stderr` 设为 UTF-8；Windows job 同时设置 `PYTHONIOENCODING=utf-8`。没有设置全局 `PYTHONUTF8`，没有改变 MSVC 捕获输出的本机编码解码方式。
+- `run` 继续让构建子进程直接写标准流，并保留 `check=True`。回归使用真实子进程输出非 UTF-8 字节，确认字节没有被捕获解码；失败子进程仍导致非零状态并保留 `CalledProcessError` 和原退出状态诊断。
+- 审查子代理独立执行 `python -B -m unittest discover -s tools/qt/tests -v`，本机 Python 3.14.8 下 5/5 通过：中文帮助、中文路径错误、非法并行数、中文命令及原始子进程输出、失败诊断。各测试主动覆盖 `PYTHONIOENCODING=cp1252:strict`／`PYTHONUTF8=0`，临时文件只写项目 `.tmp/`。
+- 两份 Python 文件的 Python 3.11 语法兼容解析通过；YAML 解析、两平台回归在 Qt 构建前执行、Windows 标准流配置、构建脚本变更使缓存键失效的检查通过；`git diff --check` 通过。项目没有配置 Python 专用 lint／静态类型检查工具，本轮没有把语法检查写成静态类型检查通过。
+- 旧版同一中文日志的 cp1252 失败复现保存在 `.tmp/qt-encoding-before/旧版原始日志错误.txt`。本轮没有运行 Windows，本机回归不能替代修复后 Windows Actions 的 Qt 构建、测试和 ZIP 启动结果；也没有重复运行无关的 C／Qt 产品矩阵。
+
+本轮审查未发现需要额外修改的代码问题。公共构建编码契约与构建指南已同步；Windows 修复后的原生流水线结果仍待重新运行。

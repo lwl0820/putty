@@ -18,6 +18,13 @@ ROOT = SCRIPT_DIRECTORY.parents[1] if SCRIPT_DIRECTORY.name == "qt" and SCRIPT_D
 LOCK = SCRIPT_DIRECTORY / "qt-sources.json"
 
 
+def configure_output_encoding():
+    """重定向日志也使用 UTF-8，不改变本机编译器输出的解码方式。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def project_temp(value):
     """防止构建、缓存或输出被误放到系统临时目录。"""
     path = Path(value).resolve()
@@ -65,6 +72,7 @@ def unpack(archive, sources):
 
 
 def main():
+    configure_output_encoding()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=project_temp, required=True)
     parser.add_argument("--work", type=project_temp, default=ROOT / ".tmp" / "qt-build")

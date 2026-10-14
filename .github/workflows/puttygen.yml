@@ -43,6 +43,8 @@ jobs:
           python -m pip install cmake==3.30.9 ninja==1.11.1.1
       - name: 检查 Qt 构建脚本
         run: python -B -m unittest discover -s tools/qt/tests -v
+      - name: 检查冒烟报告收集
+        run: python -B -m unittest discover -s apps/puttygen/packaging/tests -v
       - uses: actions/cache@v4
         with:
           path: .tmp/qt
@@ -90,6 +92,9 @@ jobs:
             done
             python3 apps/puttygen/packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform wayland
           '
+      - name: 单独暂存冒烟检查报告
+        if: always()
+        run: python apps/puttygen/packaging/collect_smoke_reports.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -98,9 +103,7 @@ jobs:
             .tmp/packages/*.deb
             .tmp/packages/*.sha256
             .tmp/build/release/Testing/Temporary/LastTest.log
-            .tmp/package-smoke/**/结果.json
-            .tmp/package-smoke/**/启动输出.txt
-            .tmp/package-smoke/weston.log
+            .tmp/package-smoke-reports/
 
   windows:
     name: Windows MSVC 2022 x64
@@ -127,6 +130,8 @@ jobs:
         run: python -m pip install cmake==3.30.9 ninja==1.11.1.1
       - name: 检查 Qt 构建脚本
         run: python -B -m unittest discover -s tools/qt/tests -v
+      - name: 检查冒烟报告收集
+        run: python -B -m unittest discover -s apps/puttygen/packaging/tests -v
       - uses: actions/cache@v4
         with:
           path: .tmp/qt
@@ -157,6 +162,9 @@ jobs:
           $package = Get-ChildItem .tmp/packages/*.zip | Select-Object -First 1
           python apps/puttygen/packaging/smoke_package.py $package.FullName --platform native
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 单独暂存冒烟检查报告
+        if: always()
+        run: python apps/puttygen/packaging/collect_smoke_reports.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -165,5 +173,4 @@ jobs:
             .tmp/packages/*.zip
             .tmp/packages/*.sha256
             .tmp/build/release/Testing/Temporary/LastTest.log
-            .tmp/package-smoke/**/结果.json
-            .tmp/package-smoke/**/启动输出.txt
+            .tmp/package-smoke-reports/

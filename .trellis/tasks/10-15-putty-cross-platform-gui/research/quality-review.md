@@ -233,3 +233,22 @@
 - 检查子代理读取 `.tmp/build/gui-dev/Testing/Temporary/LastTest.log` 确认本轮 Linux Debug CTest 3/3 通过：核心及互操作合计 8.05 秒、GUI 5.75 秒，共 13.80 秒；GUI QtTest 16 passed、0 failed、0 skipped。该开发构建使用本机 Qt 6.12，不代替 Windows 或发布 Qt 6.8.3 的运行证据。
 - `git diff --check` 通过；C99 编译／链接检查通过。仓库没有独立 C lint 或静态类型检查配置，不将这些检查记为专用 lint／类型检查通过。
 - 修复后的 Windows 原生 MSVC、权限测试、OpenSSH 互操作及 ZIP 仍须由 Actions 重新运行；不能将此次交叉编译记为原生 ACL／签名验证通过。任务继续保持 `in_progress`，完整桌面人工验收边界不变。
+
+
+## 第十二轮：容器冒烟报告上传的权限边界
+
+用户提供 Ubuntu 24.04 的 `upload-artifact` 实际失败日志：上传器递归扫描 `.tmp/package-smoke/**` 时进入容器生成的私有 `offscreen/runtime`，宿主 runner 因目录权限产生 `EACCES`。该日志定位的是上传步骤，不代表前置产品测试或安装冒烟失败；Node 的 `punycode` 弃用提示不是本次退出原因。
+
+### 修复与独立审查
+
+- 新收集器 `apps/puttygen/packaging/collect_smoke_reports.py` 仅枚举源目录第一层包名，定点读取 offscreen、XCB、Wayland、native 的 `结果.json`、`启动输出.txt`、`动态库.txt`，另收集根目录 `weston.log`。内容复制到宿主用户创建的独立 `.tmp/package-smoke-reports/`，不遍历运行目录、不继承容器所有者和权限，不复制配置、socket、解压包或私钥。
+- Ubuntu 和 Windows 均在上传前通过 `if: always()` 执行收集，上传器仅扫描报告暂存目录。两平台原包、SHA256、CTest 日志路径及构建、测试、安装／卸载命令保留；原失败步骤继续非零，收集或上传均未配置 `continue-on-error`。
+- 源缺失表示前置步骤尚未产出报告，允许空收集；GUI 失败时仍收集已有启动输出与合成器日志，不要求成功 JSON。已有报告读写失败继续非零退出并保留诊断。平台和报告符号链接不会被跟随，源或目标解析后越出项目 `.tmp/`、两目录相同或互相包含时，参数解析拒绝执行。
+- 检查子代理未发现需要进一步修改的收集器或工作流问题；补充两项 CLI 边界回归，覆盖源和目标越界、相同目录及两个包含方向。构建指南与公共构建规范已同步真实报告清单、权限与退出状态契约。
+
+### 验证与边界
+
+- 检查子代理以本机普通用户 UID 1000 独立执行 `python3 -B -m unittest discover -s apps/puttygen/packaging/tests -v`，8/8 通过、0 skipped，包含不可访问运行目录、报告读写失败、部分失败日志、无源目录、包／平台隔离及参数错误。
+- 另外针对项目已有真实冒烟树独立执行收集。`.tmp/package-smoke/puttygen-gui-0.1.0-ubuntu24.04-amd64/offscreen/runtime` 属于 UID 65534、权限 `0700`，普通审查进程直接遍历被拒绝；收集器成功复制 18 份报告到当前用户新建暂存目录，全部可递归读取且逐字节与原报告一致。前后运行目录 UID 与权限均未变。证据 `.tmp/smoke-reports-review-verification.json`，与实施代理既有 `.tmp/smoke-reports-permissions-regression.json` 结果一致。
+- 两份新增 Python 文件通过 Python 3.11 语法兼容解析；YAML 解析及两平台“收集→上传”、`always()`、上传路径和失败保留检查通过。仓库没有独立 Python lint／静态类型检查配置，不将语法检查记为专用 lint 或类型检查通过。`git diff --check` 通过。
+- 本轮仅检查报告收集与 CI 接线，没有重编 Qt、重跑无关核心矩阵或执行修改后的 GitHub Actions。远端 runner 的最终上传与新一轮 Windows 原生结果仍待实际运行；本机回归不替代上述远端状态，也不改变整体桌面人工验收边界。任务保持 `in_progress`。

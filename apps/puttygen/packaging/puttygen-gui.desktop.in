@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=PuTTYgen GUI
+Name[zh_CN]=PuTTYgen 密钥工具
+Comment=Generate and convert SSH keys
+Comment[zh_CN]=生成与转换 SSH 密钥
+Exec=@CMAKE_INSTALL_PREFIX@/bin/puttygen-gui
+Icon=puttygen-gui
+Terminal=false
+Categories=Utility;Security;
+StartupNotify=true

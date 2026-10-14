@@ -1,0 +1,163 @@
+name: 构建与发布包检查
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu:
+    name: Ubuntu ${{ matrix.version }} x64
+    runs-on: ubuntu-${{ matrix.version }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['22.04', '24.04']
+        include:
+          - version: '22.04'
+            cc: gcc-11
+            cxx: g++-11
+          - version: '24.04'
+            cc: gcc-13
+            cxx: g++-13
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      LC_ALL: C.UTF-8
+      PIP_CACHE_DIR: ${{ github.workspace }}/.tmp/pip-cache
+      TMPDIR: ${{ github.workspace }}/.tmp/temp
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备项目临时目录
+        run: mkdir -p .tmp/temp
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装对应发行版构建依赖
+        run: |
+          sudo sh tools/ubuntu-build-dependencies.sh
+          python -m pip install cmake==3.30.9 ninja==1.11.1.1
+      - uses: actions/cache@v4
+        with:
+          path: .tmp/qt
+          key: qt-6.8.3-${{ runner.os }}-ubuntu${{ matrix.version }}-${{ hashFiles('tools/qt/qt-sources.json', 'tools/qt/build_qt.py') }}
+      - name: 构建固定版本 Qt
+        run: |
+          if [ ! -f .tmp/qt/share/puttygen-gui/qt-sources/构建信息.json ]; then
+            python tools/qt/build_qt.py --prefix .tmp/qt --work .tmp/qt-build --jobs 4
+          fi
+      - name: 构建与自动测试
+        run: |
+          cmake -S . -B .tmp/build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTYGEN_RELEASE_PACKAGING=ON
+          cmake --build .tmp/build/release --parallel 4
+          QT_QPA_PLATFORM=offscreen ctest --test-dir .tmp/build/release --output-on-failure
+      - name: DEB 打包
+        run: cpack --config .tmp/build/release/CPackConfig.cmake -B .tmp/packages
+      - name: 在对应干净发行版验证安装与卸载
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work ubuntu:${{ matrix.version }} sh -c '
+            apt-get update && apt-get install -y --no-install-recommends python3 desktop-file-utils xvfb xauth x11-utils &&
+            mkdir -p .tmp/package-smoke/temp &&
+            export TMPDIR=/work/.tmp/package-smoke/temp &&
+            python3 apps/puttygen/packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform offscreen &&
+            xvfb-run -a python3 apps/puttygen/packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform xcb
+          '
+      - name: 在对应干净发行版验证 Wayland 后端
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work ubuntu:${{ matrix.version }} sh -c '
+            set -eu
+            mkdir -p .tmp/package-smoke/temp .tmp/package-smoke/wayland-runtime
+            export TMPDIR=/work/.tmp/package-smoke/temp
+            apt-get update
+            apt-get install -y --no-install-recommends python3 desktop-file-utils weston
+            chmod 700 .tmp/package-smoke/wayland-runtime
+            export XDG_RUNTIME_DIR=/work/.tmp/package-smoke/wayland-runtime
+            export WAYLAND_DISPLAY=puttygen-gui-wayland
+            weston --backend=headless-backend.so --use-pixman --socket="$WAYLAND_DISPLAY" --idle-time=0 >.tmp/package-smoke/weston.log 2>&1 &
+            compositor_pid=$!
+            trap "kill $compositor_pid 2>/dev/null || true" EXIT
+            ready=0
+            while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do
+              ready=$((ready+1))
+              if [ "$ready" -ge 30 ]; then cat .tmp/package-smoke/weston.log; exit 1; fi
+              sleep 0.5
+            done
+            python3 apps/puttygen/packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform wayland
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: puttygen-gui-ubuntu${{ matrix.version }}-amd64
+          path: |
+            .tmp/packages/*.deb
+            .tmp/packages/*.sha256
+            .tmp/build/release/Testing/Temporary/LastTest.log
+            .tmp/package-smoke/**/结果.json
+            .tmp/package-smoke/**/启动输出.txt
+            .tmp/package-smoke/weston.log
+
+  windows:
+    name: Windows MSVC 2022 x64
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      PIP_CACHE_DIR: ${{ github.workspace }}\.tmp\pip-cache
+      TMP: ${{ github.workspace }}\.tmp\temp
+      TEMP: ${{ github.workspace }}\.tmp\temp
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备项目临时目录
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force .tmp/temp | Out-Null
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: 固定构建工具版本
+        run: python -m pip install cmake==3.30.9 ninja==1.11.1.1
+      - uses: actions/cache@v4
+        with:
+          path: .tmp/qt
+          key: qt-6.8.3-windows-msvc2022-x64-${{ hashFiles('tools/qt/qt-sources.json', 'tools/qt/build_qt.py') }}
+      - name: 构建固定版本 Qt
+        shell: pwsh
+        run: |
+          if (!(Test-Path .tmp/qt/share/puttygen-gui/qt-sources/构建信息.json)) {
+            python tools/qt/build_qt.py --prefix .tmp/qt --work .tmp/qt-build --jobs 4
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: 构建与自动测试
+        shell: pwsh
+        run: |
+          cmake -S . -B .tmp/build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTYGEN_RELEASE_PACKAGING=ON
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build .tmp/build/release --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # 打包前的测试程序还未部署 DLL，需要使用同版本 Qt 的运行库。
+          $env:PATH = "$PWD/.tmp/qt/bin;$env:PATH"
+          ctest --test-dir .tmp/build/release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: ZIP 打包与原生窗口启动检查
+        shell: pwsh
+        run: |
+          cpack --config .tmp/build/release/CPackConfig.cmake -B .tmp/packages
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $package = Get-ChildItem .tmp/packages/*.zip | Select-Object -First 1
+          python apps/puttygen/packaging/smoke_package.py $package.FullName --platform native
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: puttygen-gui-windows-x64
+          path: |
+            .tmp/packages/*.zip
+            .tmp/packages/*.sha256
+            .tmp/build/release/Testing/Temporary/LastTest.log
+            .tmp/package-smoke/**/结果.json
+            .tmp/package-smoke/**/启动输出.txt

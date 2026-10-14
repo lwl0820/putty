@@ -6,7 +6,7 @@
 
 阅读 [directory-structure.md](directory-structure.md) 和 [error-handling.md](error-handling.md)，再读取当前任务 PRD、设计和研究。其余文件尚为初始化模板，不套用 Web 或数据库约束。
 
-修改公共构建脚本或 Windows CI 时，还需阅读 [build-tools.md](build-tools.md) 的标准流与子进程编码契约。
+修改公共构建脚本或 CI 时，还需阅读 [build-tools.md](build-tools.md) 的标准流编码与可选依赖发现契约。
 
 ## 质量检查
 

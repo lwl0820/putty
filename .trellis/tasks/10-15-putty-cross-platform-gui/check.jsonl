@@ -7,3 +7,5 @@
 {"file": ".trellis/spec/frontend/state-management.md", "reason": "实施中建立的Qt状态、语言与后台生命周期契约"}
 {"file": ".trellis/spec/backend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
 {"file": ".trellis/spec/frontend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
+{"file": ".trellis/spec/backend/build-tools.md", "reason": "核验标准流编码与 Qt Tools 可选 Clang 包发现边界"}
+{"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md", "reason": "核对 runner 损坏 Clang 配置的复现、修复及验证范围"}

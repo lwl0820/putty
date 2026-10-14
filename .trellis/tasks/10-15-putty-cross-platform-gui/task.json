@@ -29,8 +29,9 @@
     ".trellis/tasks/10-15-putty-cross-platform-gui/research/gui-architecture.md",
     ".trellis/tasks/10-15-putty-cross-platform-gui/research/quality-review.md",
     ".trellis/tasks/10-15-putty-cross-platform-gui/research/wayland-input.md",
-    ".trellis/tasks/10-15-putty-cross-platform-gui/research/commit-plan.md"
+    ".trellis/tasks/10-15-putty-cross-platform-gui/research/commit-plan.md",
+    ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md"
   ],
-  "notes": "三批本地提交已完成，并按用户要求整合到main。用户提供Windows Actions失败日志：Python3.11的cp1252标准流无法输出Qt构建脚本中文日志，构建在执行Qt配置前中断。本轮修复脚本标准流与Windows job编码，并增加Qt构建前的定向回归；原生Windows构建、打包及运行仍需重跑Actions确认。已有Ubuntu验证保留；原版GUI人工比对与完整用户桌面验收未完成。保持in_progress，不归档。",
+  "notes": "三批本地提交已完成，并按用户要求整合到main。Windows标准流中文编码修复ba44106已推送。用户继续提供Ubuntu Actions失败日志：Qt Tools可选Clang探测加载runner不完整Clang导出配置，缺失libclangBasic.a。本轮禁用不需要的Clang包发现并补回归，保留Linguist；修复后的原生Actions完整结果仍待确认。已有Ubuntu本地验证保留；Windows构建、打包、原版GUI人工比对与完整用户桌面验收未完成。保持in_progress，不归档。",
   "meta": {}
 }

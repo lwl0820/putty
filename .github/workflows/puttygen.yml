@@ -37,12 +37,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: 检查 Qt 构建脚本日志编码
-        run: python -B -m unittest discover -s tools/qt/tests -v
       - name: 安装对应发行版构建依赖
         run: |
           sudo sh tools/ubuntu-build-dependencies.sh
           python -m pip install cmake==3.30.9 ninja==1.11.1.1
+      - name: 检查 Qt 构建脚本
+        run: python -B -m unittest discover -s tools/qt/tests -v
       - uses: actions/cache@v4
         with:
           path: .tmp/qt
@@ -120,13 +120,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: 检查 Qt 构建脚本日志编码
-        run: python -B -m unittest discover -s tools/qt/tests -v
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
       - name: 固定构建工具版本
         run: python -m pip install cmake==3.30.9 ninja==1.11.1.1
+      - name: 检查 Qt 构建脚本
+        run: python -B -m unittest discover -s tools/qt/tests -v
       - uses: actions/cache@v4
         with:
           path: .tmp/qt

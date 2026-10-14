@@ -71,6 +71,21 @@ def unpack(archive, sources):
     return destination
 
 
+def module_configure_command(module, source, build, prefix):
+    command = ["cmake", "-S", source, "-B", build, "-G", "Ninja",
+               f"-DCMAKE_PREFIX_PATH={prefix}", f"-DCMAKE_INSTALL_PREFIX={prefix}",
+               "-DCMAKE_BUILD_TYPE=Release", "-DQT_BUILD_EXAMPLES=OFF",
+               "-DQT_BUILD_TESTS=OFF", "-DCMAKE_INSTALL_LIBDIR=lib"]
+    if module == "qttools":
+        # Qt 6.8.3 即使关闭 QDoc 仍会探测 Clang；在包发现入口避开不完整的系统 LLVM。
+        command += ["-DFEATURE_assistant=OFF", "-DFEATURE_designer=OFF", "-DFEATURE_qdoc=OFF",
+                    "-DFEATURE_clang=OFF", "-DFEATURE_clangcpp=OFF",
+                    "-DCMAKE_DISABLE_FIND_PACKAGE_WrapLibClang=TRUE"]
+    if module == "qtwayland":
+        command += ["-DFEATURE_wayland_server=OFF"]
+    return command
+
+
 def main():
     configure_output_encoding()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -111,15 +126,7 @@ def main():
                 command = ["cmd.exe", "/c", *command]
             run(command, build)
         else:
-            command = ["cmake", "-S", source, "-B", build, "-G", "Ninja",
-                       f"-DCMAKE_PREFIX_PATH={args.prefix}", f"-DCMAKE_INSTALL_PREFIX={args.prefix}",
-                       "-DCMAKE_BUILD_TYPE=Release", "-DQT_BUILD_EXAMPLES=OFF",
-                       "-DQT_BUILD_TESTS=OFF", "-DCMAKE_INSTALL_LIBDIR=lib"]
-            if module == "qttools":
-                command += ["-DFEATURE_assistant=OFF", "-DFEATURE_designer=OFF", "-DFEATURE_qdoc=OFF"]
-            if module == "qtwayland":
-                command += ["-DFEATURE_wayland_server=OFF"]
-            run(command)
+            run(module_configure_command(module, source, build, args.prefix))
         run(["cmake", "--build", build, "--parallel", args.jobs])
         run(["cmake", "--install", build])
     material = args.prefix / "share" / "puttygen-gui" / "qt-sources"

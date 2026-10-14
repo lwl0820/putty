@@ -194,3 +194,22 @@
 - 旧版同一中文日志的 cp1252 失败复现保存在 `.tmp/qt-encoding-before/旧版原始日志错误.txt`。本轮没有运行 Windows，本机回归不能替代修复后 Windows Actions 的 Qt 构建、测试和 ZIP 启动结果；也没有重复运行无关的 C／Qt 产品矩阵。
 
 本轮审查未发现需要额外修改的代码问题。公共构建编码契约与构建指南已同步；Windows 修复后的原生流水线结果仍待重新运行。
+
+## 第十轮：Ubuntu Actions 的可选 Clang 包发现
+
+用户的实际 Ubuntu Actions 日志确认：Qt Tools 配置在 `FindWrapLibClang.cmake` 加载 runner 的 Clang 导出配置，因引用缺失的 `libclangBasic.a` 而失败。此前没有 Clang 的干净 Ubuntu 构建无法覆盖这一环境差异，不能将其与 Windows 标准流错误混为一谈。
+
+### 修复与审查发现
+
+- `tools/qt/build_qt.py` 将已有单模块配置命令抽为 `module_configure_command`，仅给 Qt Tools 增加 `CMAKE_DISABLE_FIND_PACKAGE_WrapLibClang=TRUE` 与 `FEATURE_clang`／`FEATURE_clangcpp=OFF`。Qt Base、Translations、Wayland 原有参数保持；Linguist 保留，版本锁和系统依赖未变。构建命令仍由 `run` 的 `check=True` 传播失败。
+- 审查发现新增依赖回归实际调用 CMake／Ninja，但两个 CI job 的测试步骤仍先于固定工具安装。已将其移至工具安装之后、Qt 缓存恢复及构建之前，避免依赖 runner 预装工具；步骤名改为“检查 Qt 构建脚本”。缓存键继续包含构建脚本哈希。
+- 构建指南、公共构建规范及其索引已同步包发现边界和测试顺序；两份 JSONL 的 11 项上下文路径均存在，任务继续保持 `in_progress`。
+
+### 本轮验证证据
+
+- 检查子代理独立执行轻量回归，Python 3.14.8 下 9/9 通过。其中三个配置测试实际执行 CMake 并使用引用缺失库的 `ClangConfig.cmake`：旧参数失败、只关闭功能仍失败、新参数成功且未进入损坏包；测试不只检查参数字符串。此前 5 项 cp1252 子进程回归继续通过。
+- 三份 Python 文件均通过 Python 3.11 语法兼容解析；工作流 YAML、两平台“固定工具安装→测试→缓存→Qt”顺序及缓存键检查通过；`git diff --check` 通过。没有专用 Python lint／静态类型检查配置，不将语法检查记为静态类型检查通过。
+- 实施代理在 Ubuntu 22.04 和 24.04 使用真实 Qt 6.8.3 Qt Tools 源码与各自既有 Qt SDK 验证。检查子代理直接读取两份 `result.json`、配置日志及缓存：旧参数和仅 feature 参数均退出 1 并进入损坏 Clang 包，新参数均退出 0 且不进入该包；缓存中 Clang／ClangCPP 关闭、Linguist 开启。
+- 两系统的 `lrelease`、`lupdate`、`lconvert` 目标构建命令均成功，原生执行前两者报告 6.8.3，`lconvert -help` 正常。最终复验日志显示 Ninja 无需重建；首次采集误用不受支持的 `lconvert -version`，实施代理改为 `-help` 后复验通过，该误参不涉及产品脚本。
+
+实际 Qt 验证证据位于 `.tmp/actions-ubuntu-failure/libclang-regression/{22.04,24.04}/` 的 `old.log`、`features-only.log`、`fixed.log`、`linguist-build.log` 和 `result.json`，驱动为同目录上层的 `verify.py`。本轮没有重编整套 Qt、重跑完整产品矩阵，也没有运行修复后的 GitHub runner；远端 Actions、Windows 原生产品与人工桌面验收仍按真实结果另行确认。

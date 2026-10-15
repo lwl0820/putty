@@ -24,6 +24,50 @@ CHECKS = {"startup-discovery", "dual-list", "pipe-add-wm-list", "dual-signatures
           "unix-listener-failure-cleanup", "unix-partial-close", "unix-pending-close", "unix-endpoint-cleanup"}
 
 
+def safe_diagnostics(output):
+    """只导出固定阶段和数值位置；不转录路径、任意上游日志或异常详情。"""
+    if not isinstance(output, bytes):
+        return []
+    fixed = {"Windows Pageant IPC 失败：检查未通过",
+             *("Pageant 测试阶段：" + stage for stage in (
+                 "初始化", "分帧客户端", "管道停滞客户端", "窗口停滞客户端", "已有文件拒绝",
+                 "缺失父目录拒绝", "无效编码拒绝", "跨进程替换拒绝", "三传输启动",
+                 "三传输共享密钥与签名", "在途与部分帧关闭", "AF_UNIX 在途提示关闭", "全部完成"))}
+    selected = []
+    bounded = output[:16384]
+    if len(output) > len(bounded):
+        # 截断后的半行可能仍符合数字白名单，但其 RVA 已不再完整。
+        newline = bounded.rfind(b"\n")
+        bounded = bounded[:newline + 1]
+    for raw in bounded.splitlines()[-128:]:
+        try:
+            line = raw.decode("utf-8")
+        except UnicodeError:
+            continue
+        if (line in fixed or
+                re.fullmatch(r"Pageant AF_UNIX 子阶段：编号=(?:[1-9]|1[0-9]|2[0-2]|3[0-9])", line) or
+                re.fullmatch(r"Pageant 测试检查失败：行=[1-9][0-9]{0,4}", line) or
+                re.fullmatch(r"Pageant 测试故障：类型=(?:abort|exception)，代码=0x[0-9a-fA-F]{8}，"
+                             r"阶段=(?:0|[1-9][0-9]{0,2})", line) or
+                re.fullmatch(r"Pageant 测试栈：帧=(?:[0-9]|1[0-9]|2[0-3])，偏移=0x[0-9a-fA-F]{1,16}", line)):
+            selected.append(line)
+    return selected[-64:]
+
+
+def run_child(arguments, *, cwd, environment):
+    try:
+        result = subprocess.run(arguments, cwd=cwd, env=environment, capture_output=True, timeout=70)
+    except subprocess.TimeoutExpired as error:
+        diagnosis = safe_diagnostics(error.stderr)
+        suffix = "；" + "；".join(diagnosis) if diagnosis else ""
+        raise ValidationError("Pageant 原生宿主超出 70 秒上限" + suffix) from None
+    if result.returncode:
+        diagnosis = safe_diagnostics(result.stderr)
+        suffix = "；" + "；".join(diagnosis) if diagnosis else ""
+        raise ValidationError(f"Pageant 原生宿主失败，退出码 {result.returncode}" + suffix)
+    return result
+
+
 def audit_map(path):
     content = project_path(path, must_exist=True).read_text(encoding="utf-8", errors="replace")
     if re.search(r"(?<![\w])(?:sshrand|storage|noise)(?:\.c)?\.obj\b", content, re.I):
@@ -87,13 +131,9 @@ def run(binary, parent):
         preserved = security.write(root / "existing.txt", b"pageant-unix-existing-file-preserved\n")
         identity = preserved.stat().st_ino
         digest = file_digest(preserved)
-        result = subprocess.run([str(binary), "--scope", uuid.uuid4().hex,
-                                 "--unix-socket", str(endpoint), "--blocked-path", str(preserved)],
-                                cwd=root, env=native_environment(root),
-                                capture_output=True, timeout=70)
-        if result.returncode:
-            raise ValidationError(f"Pageant 原生宿主失败，退出码 {result.returncode}：" +
-                                  result.stderr.decode("utf-8", errors="replace")[:4096])
+        result = run_child([str(binary), "--scope", uuid.uuid4().hex,
+                            "--unix-socket", str(endpoint), "--blocked-path", str(preserved)],
+                           cwd=root, environment=native_environment(root))
         report = decode(result.stdout)
         security.check_file(preserved)
         if preserved.stat().st_ino != identity or file_digest(preserved) != digest:

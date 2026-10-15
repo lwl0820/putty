@@ -1,4 +1,11 @@
 #include "pa_agent.h"
+#if defined(_WIN32) && defined(PA_WINDOWS_TEST_NAMESPACE)
+/* 固定编号只用于专用原生宿主定位；生产目标不输出阶段。 */
+extern void pa_test_unix_stage(unsigned stage);
+#define PA_UNIX_TEST_STAGE(stage) pa_test_unix_stage(stage)
+#else
+#define PA_UNIX_TEST_STAGE(stage) ((void)0)
+#endif
 #include "putty.h"
 #include "ssh.h"
 #include "pageant.h"
@@ -336,6 +343,7 @@ static bool wait_unix_probe(SOCKET socket, bool readable, ULONGLONG deadline)
 }
 static bool verify_unix_endpoint(const char *path)
 {
+    PA_UNIX_TEST_STAGE(11);
     SOCKET listener = INVALID_SOCKET, probe = INVALID_SOCKET, accepted = INVALID_SOCKET;
     bool verified = false;
     ULONGLONG deadline = GetTickCount64() + 250;
@@ -354,6 +362,7 @@ static bool verify_unix_endpoint(const char *path)
         }
     }
     if (listener == INVALID_SOCKET) return false;
+    PA_UNIX_TEST_STAGE(12);
     probe = socket(AF_UNIX, SOCK_STREAM, 0);
     if (probe == INVALID_SOCKET) goto finished;
     u_long nonblocking = 1;
@@ -362,34 +371,44 @@ static bool verify_unix_endpoint(const char *path)
     SOCKADDR_UN address = {0};
     address.sun_family = AF_UNIX;
     memcpy(address.sun_path, path, strlen(path) + 1);
+    PA_UNIX_TEST_STAGE(13);
     if (connect(probe, (struct sockaddr *)&address, sizeof(address)) != 0 &&
         WSAGetLastError() != WSAEWOULDBLOCK) goto finished;
     /* Windows 的本地 connect 可能等待 accept。仅接收自己的原生监听，
      * 不在 create 内运行核心或 GUI 消息循环，整个探针最多等待 250 ms。 */
+    PA_UNIX_TEST_STAGE(14);
     if (!wait_unix_probe(listener, true, deadline)) goto finished;
+    PA_UNIX_TEST_STAGE(15);
     accepted = accept(listener, NULL, NULL);
     if (accepted == INVALID_SOCKET ||
         !SetHandleInformation((HANDLE)accepted, HANDLE_FLAG_INHERIT, 0) ||
-        ioctlsocket(accepted, FIONBIO, &nonblocking) != 0 ||
-        !wait_unix_probe(probe, false, deadline)) goto finished;
+        ioctlsocket(accepted, FIONBIO, &nonblocking) != 0) goto finished;
+    PA_UNIX_TEST_STAGE(16);
+    if (!wait_unix_probe(probe, false, deadline)) goto finished;
     int error = 0, error_size = sizeof(error);
     if (getsockopt(probe, SOL_SOCKET, SO_ERROR, (char *)&error, &error_size) != 0 || error)
         goto finished;
+    PA_UNIX_TEST_STAGE(17);
     verified = unix_peer_is_current_process(probe) && unix_peer_is_current_process(accepted) &&
                GetTickCount64() < deadline;
   finished:
     if (accepted != INVALID_SOCKET) {
         /* accept 可能继承 WSAAsyncSelect；按上游代次屏障丢弃已排队的旧句柄消息。 */
+        PA_UNIX_TEST_STAGE(18);
         do_select(accepted, false);
+        PA_UNIX_TEST_STAGE(19);
         closesocket(accepted);
+        PA_UNIX_TEST_STAGE(20);
         done_with_socket(accepted);
     }
+    PA_UNIX_TEST_STAGE(21);
     if (probe != INVALID_SOCKET) closesocket(probe);
     return verified;
 }
 #endif
 static bool start_unix_listener(pa_state *s)
 {
+    PA_UNIX_TEST_STAGE(1);
     const char *path = s->options.socket_path;
     if (!path[0]) return true;
 #if HAVE_AFUNIX_H && defined(SIO_AF_UNIX_GETPEERPID)
@@ -402,6 +421,7 @@ static bool start_unix_listener(pa_state *s)
     if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, chars) != chars) {
         sfree(wide); return false;
     }
+    PA_UNIX_TEST_STAGE(2);
     DWORD attributes = GetFileAttributesW(wide);
     DWORD error = GetLastError();
     /* 现存端点也拒绝，不使用原版 remove 去删除用户指定的既有文件。 */
@@ -410,16 +430,23 @@ static bool start_unix_listener(pa_state *s)
         sfree(wide); return false;
     }
     Plug *plug;
+    PA_UNIX_TEST_STAGE(3);
     s->unix_listener = pageant_listener_new(&plug, &s->client);
+    PA_UNIX_TEST_STAGE(4);
     Socket *socket = sk_newlistener_unix(path, plug);
+    PA_UNIX_TEST_STAGE(5);
     bool failed = sk_socket_error(socket) != NULL;
+    PA_UNIX_TEST_STAGE(6);
     pageant_listener_got_socket(s->unix_listener, socket);
+    PA_UNIX_TEST_STAGE(7);
     if (failed) { sfree(wide); return false; }
 #ifdef PA_WINDOWS_TEST_NAMESPACE
     /* 专用宿主在此替换端点，回归 bind 与文件句柄获取之间的竞态。 */
     extern void pa_test_unix_after_bind(const char *path);
+    PA_UNIX_TEST_STAGE(8);
     pa_test_unix_after_bind(path);
 #endif
+    PA_UNIX_TEST_STAGE(9);
     HANDLE endpoint = CreateFileW(wide, DELETE | FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
@@ -436,11 +463,13 @@ static bool start_unix_listener(pa_state *s)
         return false;
     }
     /* 固定路径对象后，须实际连接回本次监听并核双方 PID；类型检查不能证明归属。 */
+    PA_UNIX_TEST_STAGE(10);
     if (!verify_unix_endpoint(path)) {
         CloseHandle(endpoint);
         return false;
     }
     /* 只有归属探针成功才取得删除权；收尾不再按路径删除。 */
+    PA_UNIX_TEST_STAGE(22);
     s->unix_endpoint = endpoint;
     return true;
 #else
@@ -450,6 +479,7 @@ static bool start_unix_listener(pa_state *s)
 #endif
 static void destroy(void *context)
 {
+    PA_UNIX_TEST_STAGE(30);
     pa_state *s = context;
     s->destroying = true;
 #ifdef _WIN32
@@ -462,21 +492,29 @@ static void destroy(void *context)
     if (s->registered) pageant_unregister_client(&s->legacy);
 #endif
     if (s->listener) {
+        PA_UNIX_TEST_STAGE(31);
         pageant_listener_shutdown_connections(s->listener);
+        PA_UNIX_TEST_STAGE(32);
         pageant_listener_free(s->listener);
+        PA_UNIX_TEST_STAGE(33);
     }
 #ifdef _WIN32
     if (s->unix_listener) {
+        PA_UNIX_TEST_STAGE(34);
         pageant_listener_shutdown_connections(s->unix_listener);
+        PA_UNIX_TEST_STAGE(35);
         pageant_listener_free(s->unix_listener);
+        PA_UNIX_TEST_STAGE(36);
     }
     if (s->unix_endpoint) {
+        PA_UNIX_TEST_STAGE(37);
         FILE_DISPOSITION_INFO disposition;
         disposition.DeleteFile = TRUE;
         SetFileInformationByHandle(s->unix_endpoint, FileDispositionInfo,
                                    &disposition, sizeof(disposition));
         CloseHandle(s->unix_endpoint);
     }
+    PA_UNIX_TEST_STAGE(38);
 #endif
 #ifndef _WIN32
     if (s->options.socket_path[0]) unlink(s->options.socket_path);
@@ -494,6 +532,7 @@ static void destroy(void *context)
     }
     active = NULL;
     sfree(s);
+    PA_UNIX_TEST_STAGE(39);
 }
 static void *create(pr_core *core, const void *options, size_t size)
 {

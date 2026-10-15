@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -53,6 +54,45 @@ class RunnerChecks(unittest.TestCase):
         self.assertEqual(len(checks), 15)
         with self.assertRaises(runner.ValidationError):
             runner.decode(json.dumps(report).encode())
+
+    def test_fault_diagnostics_only_allow_fixed_stages_and_numeric_locations(self):
+        allowed = ["Pageant 测试阶段：缺失父目录拒绝", "Pageant AF_UNIX 子阶段：编号=6",
+                   "Pageant 测试检查失败：行=421",
+                   "Pageant 测试故障：类型=abort，代码=0x00000006，阶段=20",
+                   "Pageant 测试栈：帧=7，偏移=0x123abc"]
+        rejected = ["口令=保密", "Pageant 测试阶段：C:\\个人路径", "Pageant AF_UNIX 子阶段：编号=1000",
+                    "Pageant 测试故障：类型=任意日志，代码=0x00000006，阶段=20",
+                    "Pageant 测试栈：帧=24，偏移=0x123abc", "Pageant 测试栈：帧=7，偏移=C:\\密钥",
+                    "Windows Pageant IPC 失败：个人路径", "Pageant 测试检查失败：行=421 口令"]
+        self.assertEqual(runner.safe_diagnostics("\n".join(allowed + rejected).encode()), allowed)
+        self.assertEqual(runner.safe_diagnostics(b"x" * 16384 + "\n".join(allowed).encode()), [])
+        self.assertEqual(runner.safe_diagnostics("\n".join(allowed * 40).encode()), (allowed * 40)[-64:])
+        self.assertEqual(runner.safe_diagnostics(None), [])
+
+    def test_truncated_diagnostic_line_cannot_change_numeric_location(self):
+        line = "Pageant 测试栈：帧=7，偏移=0x123abc".encode()
+        prefix = b"x" * (16384 - len(line) + 2) + b"\n"
+        self.assertEqual(runner.safe_diagnostics(prefix + line), [])
+        self.assertEqual(runner.safe_diagnostics(line + b"\r\n" + b"x" * 16384), [line.decode()])
+        self.assertEqual(runner.safe_diagnostics(b"\xff\n" + line), [line.decode()])
+
+    def test_failure_and_timeout_keep_only_safe_fault_diagnostics(self):
+        output = "Pageant 测试阶段：三传输启动\nPageant 测试栈：帧=7，偏移=0x42\n私钥=秘密\n".encode()
+        result = subprocess.CompletedProcess(["fixture"], 134, b"", output)
+        outcomes = (result, subprocess.TimeoutExpired(["fixture"], 70, stderr=output))
+        for outcome in outcomes:
+            with self.subTest(outcome=type(outcome).__name__), patch.object(runner.subprocess, "run") as execute:
+                if isinstance(outcome, Exception):
+                    execute.side_effect = outcome
+                else:
+                    execute.return_value = outcome
+                with self.assertRaises(runner.ValidationError) as caught:
+                    runner.run_child(["fixture"], cwd=Path("."), environment={})
+                self.assertIn("Pageant 测试阶段：三传输启动", str(caught.exception))
+                self.assertIn("偏移=0x42", str(caught.exception))
+                self.assertNotIn("秘密", str(caught.exception))
+                self.assertNotIn("私钥", str(caught.exception))
+                self.assertEqual(execute.call_args.kwargs["timeout"], 70)
 
 
 if __name__ == "__main__":

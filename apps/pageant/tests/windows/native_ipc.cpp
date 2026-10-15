@@ -13,6 +13,9 @@
 #include <QThread>
 #include <QTimer>
 #include <cstdio>
+#include <csignal>
+#include <cstdlib>
+#include <cstdint>
 #include <atomic>
 #include <array>
 #include <future>
@@ -26,8 +29,63 @@
 #ifdef NDEBUG
 #error 原生 IPC 测试必须保留断言
 #endif
-#define CHECK(value) do { if (!(value)) throw std::runtime_error( \
-    std::string("源码行 ") + std::to_string(__LINE__) + "：" #value); } while (0)
+static volatile LONG diagnosticStage = 0, diagnosticFault = 0;
+static void diagnosticWrite(const char *data, size_t length)
+{
+    DWORD written = 0;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), data, DWORD(length), &written, nullptr);
+}
+static void diagnosticStack(const char *kind, DWORD code)
+{
+    if (InterlockedCompareExchange(&diagnosticFault, 1, 0)) return;
+    char line[256];
+    int size = std::snprintf(line, sizeof(line),
+        "Pageant 测试故障：类型=%s，代码=0x%08lx，阶段=%ld\n", kind,
+        static_cast<unsigned long>(code), InterlockedCompareExchange(&diagnosticStage, 0, 0));
+    if (size > 0 && size < int(sizeof(line))) diagnosticWrite(line, size_t(size));
+    void *frames[24]{};
+    const auto count = CaptureStackBackTrace(0, 24, frames, nullptr);
+    const auto executable = GetModuleHandleW(nullptr);
+    for (USHORT index = 0; index < count; ++index) {
+        HMODULE module = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               reinterpret_cast<LPCWSTR>(frames[index]), &module) || module != executable)
+            continue;
+        const auto offset = reinterpret_cast<uintptr_t>(frames[index]) - reinterpret_cast<uintptr_t>(module);
+        size = std::snprintf(line, sizeof(line), "Pageant 测试栈：帧=%u，偏移=0x%llx\n",
+                            unsigned(index), static_cast<unsigned long long>(offset));
+        if (size > 0 && size < int(sizeof(line))) diagnosticWrite(line, size_t(size));
+    }
+}
+static void diagnosticAbort(int)
+{
+    /* 只改变专用测试宿主的故障收尾；不执行析构，不把断言转换为可恢复错误。 */
+    diagnosticStack("abort", SIGABRT);
+    TerminateProcess(GetCurrentProcess(), 134);
+    std::_Exit(134);
+}
+static LONG WINAPI diagnosticException(EXCEPTION_POINTERS *exception)
+{
+    diagnosticStack("exception", exception->ExceptionRecord->ExceptionCode);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+static void testStage(const char *stage, LONG number)
+{
+    InterlockedExchange(&diagnosticStage, number);
+    std::fprintf(stderr, "Pageant 测试阶段：%s\n", stage); std::fflush(stderr);
+}
+extern "C" void pa_test_unix_stage(unsigned stage)
+{
+    InterlockedExchange(&diagnosticStage, LONG(stage));
+    std::fprintf(stderr, "Pageant AF_UNIX 子阶段：编号=%u\n", stage); std::fflush(stderr);
+}
+static void checkFailure(unsigned line)
+{
+    std::fprintf(stderr, "Pageant 测试检查失败：行=%u\n", line); std::fflush(stderr);
+    throw std::runtime_error("检查未通过");
+}
+#define CHECK(value) do { if (!(value)) checkFailure(__LINE__); } while (0)
 extern "C" int pa_test_verify(const void *, size_t, const void *, size_t, const void *, size_t);
 extern "C" void *pa_test_stalled_pipe(void);
 extern "C" int pa_test_remote_query(void);
@@ -526,6 +584,11 @@ static void checkReplacedUnixEndpoint(const QString &scope, const QString &path)
 }
 int main(int argc, char **argv)
 {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    std::signal(SIGABRT, diagnosticAbort);
+    SetUnhandledExceptionFilter(diagnosticException);
+    testStage("初始化", 100);
     pa_windows_prepare();
     QCoreApplication app(argc, argv);
     try {
@@ -550,8 +613,11 @@ int main(int argc, char **argv)
         }
         if (arguments.contains(QStringLiteral("--bounded-client"))) return boundedClient();
         if (!arguments.contains(QStringLiteral("--probe-existing"))) {
+            testStage("分帧客户端", 101);
             checkStalledClient(false, QString::fromLatin1(scope), true);
+            testStage("管道停滞客户端", 102);
             checkStalledClient(false, QString::fromLatin1(scope));
+            testStage("窗口停滞客户端", 103);
             checkStalledClient(true, QString::fromLatin1(scope));
         }
         bool existing = false; char *error = nullptr;
@@ -575,13 +641,18 @@ int main(int argc, char **argv)
         CHECK(preserved.open(QIODevice::ReadOnly));
         const auto content = preserved.readAll(); preserved.close();
         CHECK(content == "pageant-unix-existing-file-preserved\n");
+        testStage("已有文件拒绝", 104);
         rejectedUnixListener(blocked);
         CHECK(preserved.open(QIODevice::ReadOnly) && preserved.readAll() == content); preserved.close();
         const auto missing = QDir::toNativeSeparators(QDir::current().filePath(QStringLiteral("missing/agent.sock"))).toLocal8Bit();
+        testStage("缺失父目录拒绝", 105);
         rejectedUnixListener(missing);
         CHECK(GetFileAttributesA(missing.constData()) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_PATH_NOT_FOUND);
+        testStage("无效编码拒绝", 106);
         rejectedUnixListener(QByteArray(1, char(0xff)));
+        testStage("跨进程替换拒绝", 107);
         checkReplacedUnixEndpoint(QString::fromLatin1(scope), path);
+        testStage("三传输启动", 108);
         pa_options options{}; socketOptions(options, unixPath);
         Runtime runtime(pa_agent_module, QByteArray(reinterpret_cast<const char *>(&options), sizeof(options)));
         bool ready = false, failed = false;
@@ -605,6 +676,7 @@ int main(int argc, char **argv)
         probe.start(app.applicationFilePath(), {QStringLiteral("--probe-existing"), QStringLiteral("--scope"),
                                                QString::fromLatin1(scope)});
         CHECK(probe.waitForFinished(8000) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0);
+        testStage("三传输共享密钥与签名", 109);
         const auto list = QByteArray(1, char(11));
         CHECK(query(false, list) == QByteArray(1, char(12)) + number(0));
         CHECK(query(true, list) == QByteArray(1, char(12)) + number(0));
@@ -655,6 +727,7 @@ int main(int argc, char **argv)
         CHECK(signedReply[0] == char(14) && u32(signedReply, 1) == quint32(signedReply.size() - 5));
         CHECK(pa_test_verify(blob.constData(), size_t(blob.size()), signedReply.constData() + 5,
                              size_t(signedReply.size() - 5), "decrypt", 7));
+        testStage("在途与部分帧关闭", 110);
         const auto reencrypt = QByteArray(1, char(27)) + string("reencrypt@putty.projects.tartarus.org") + string(blob);
         CHECK(query(false, reencrypt) == QByteArray(1, char(6)));
         auto pending = std::async(std::launch::async, [] { return windowQuery(signRequest("pending")); });
@@ -689,7 +762,9 @@ int main(int argc, char **argv)
         bool after = true; error = nullptr;
         lock = pa_windows_startup_lock(&after, &error);
         CHECK(lock && !error && !after); pa_windows_startup_unlock(lock);
+        testStage("AF_UNIX 在途提示关闭", 111);
         unixPendingClose();
+        testStage("全部完成", 112);
         std::puts("{\"schema\":1,\"kind\":\"pageant-ipc\",\"passed\":true,\"storage\":\"not-run\","
             "\"checks\":[\"startup-discovery\",\"dual-list\",\"pipe-add-wm-list\",\"dual-signatures\","
             "\"malformed-copydata\",\"malformed-mapping\",\"cross-transport-remove\",\"deferred-cancel\","
@@ -698,7 +773,7 @@ int main(int argc, char **argv)
             "\"unix-list\",\"unix-cross-transport-keys\",\"unix-signature\",\"unix-existing-file-preserved\","
             "\"unix-listener-failure-cleanup\",\"unix-partial-close\",\"unix-pending-close\",\"unix-endpoint-cleanup\"]}");
         return 0;
-    } catch (const std::exception &error) {
-        std::fprintf(stderr, "Windows Pageant IPC 失败：%s\n", error.what()); return 1;
+    } catch (const std::exception &) {
+        std::fprintf(stderr, "Windows Pageant IPC 失败：检查未通过\n"); return 1;
     }
 }

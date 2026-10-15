@@ -16,6 +16,11 @@ DWORD suite_hive_open(const wchar_t *project_tmp, const wchar_t *root,
 DWORD suite_hive_pause(suite_private_hive *context);
 DWORD suite_hive_resume(suite_private_hive *context);
 DWORD suite_hive_close(suite_private_hive *context);
+/* 只移交操作权，不解除进程 HKCU 映射、不关闭键或释放固定路径。
+ * release 必须由当前所有者在其全部借用键关闭后调用；claim 只接受无所有者状态。
+ * 调用方负责串行传递上下文生命周期；移交期间不得 close/cleanup。 */
+DWORD suite_hive_release_owner(suite_private_hive *context);
+DWORD suite_hive_claim_owner(suite_private_hive *context);
 /* close 保留文件供另一个显式初始化的进程加载；cleanup 只删除验证过的私有运行根。
  * 本进程存在活动映射时，cleanup 在删除任何文件之前返回 ERROR_BUSY。 */
 DWORD suite_hive_cleanup(const wchar_t *project_tmp, const wchar_t *root);

@@ -14,7 +14,8 @@ sys.path.insert(0, str(SUITE_WINDOWS))
 from support import (CHECKS, TEMPORARY_ROOT, ValidationError, audit_link_map,
                      decode_native_report, native_environment, project_path)  # noqa: E402
 from check_build import assertions, assertions_enabled, installation  # noqa: E402
-from run_ctest import PAGEANT_EXPECTED, TERMINAL_EXPECTED, inspect_results, validate_selection  # noqa: E402
+from run_ctest import (PAGEANT_EXPECTED, SSPI_NEGATIVE_EXPECTED, TERMINAL_EXPECTED, TERMINAL_SSH_EXPECTED,
+                       inspect_results, validate_selection)  # noqa: E402
 from run_native_test import run  # noqa: E402
 
 
@@ -195,6 +196,62 @@ class WindowsContractTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(any("\u4e00" <= character <= "\u9fff"
                                 for character in result.stdout.decode("utf-8")))
+
+    def test_terminal_ssh_requires_hive_and_two_actual_successes(self):
+        path = self.root / "terminal-ssh-results.xml"
+        tests = [{"name": name} for name in sorted(TERMINAL_SSH_EXPECTED)]
+        validate_selection({"tests": tests}, TERMINAL_SSH_EXPECTED)
+        for changed in ([], tests[:-1], tests + tests[:1]):
+            with self.subTest(changed=changed), self.assertRaises(ValidationError):
+                validate_selection({"tests": changed}, TERMINAL_SSH_EXPECTED)
+        native = ('<testcase name="runtime-windows-handles"/>'
+                  '<testcase name="runtime-windows-events"/>'
+                  '<testcase name="runtime-windows-hive"/>')
+        cases = ['<testcase name="' + name + '"/>' for name in sorted(TERMINAL_SSH_EXPECTED)]
+
+        def write(terminal):
+            path.write_text('<testsuite>' + native + terminal + '</testsuite>', encoding="utf-8")
+
+        write(''.join(cases))
+        with self.assertRaises(ValidationError):
+            inspect_results(path, require_terminal_ssh=True)
+        report = inspect_results(path, require_hive=True, require_terminal_ssh=True)
+        self.assertEqual(report["terminal_private_ssh_ppk"], "passed")
+        self.assertNotIn("terminal-real-ssh-ppk", report["unverified"])
+        self.assertIn("terminal-native-sspi", report["unverified"])
+        self.assertIn("windows-10-desktop", report["unverified"])
+        for changed in ('', ''.join(cases[:-1]), ''.join(cases + cases[:1])):
+            write(changed)
+            with self.subTest(changed=changed), self.assertRaises(ValidationError):
+                inspect_results(path, require_hive=True, require_terminal_ssh=True)
+        for name in sorted(TERMINAL_SSH_EXPECTED):
+            others = ''.join(case for case in cases if case != '<testcase name="' + name + '"/>')
+            for tag in ("skipped", "failure", "error"):
+                write(others + '<testcase name="' + name + '"><' + tag + '/></testcase>')
+                with self.subTest(name=name, tag=tag), self.assertRaises(ValidationError):
+                    inspect_results(path, require_hive=True, require_terminal_ssh=True)
+            for status in ("notrun", "disabled", "skipped"):
+                write(others + '<testcase name="' + name + '" status="' + status + '"/>')
+                with self.subTest(name=name, status=status), self.assertRaises(ValidationError):
+                    inspect_results(path, require_hive=True, require_terminal_ssh=True)
+
+    def test_native_sspi_negative_never_claims_positive_authentication(self):
+        path = self.root / "sspi-results.xml"
+        validate_selection({"tests": [{"name": "terminal-windows-sspi-negative"}]}, SSPI_NEGATIVE_EXPECTED)
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        good = '<testcase name="terminal-windows-sspi-negative"/>'
+        path.write_text('<testsuite>' + native + good + '</testsuite>', encoding="utf-8")
+        report = inspect_results(path, require_sspi_negative=True)
+        self.assertEqual(report["terminal_native_sspi_negative"], "passed")
+        self.assertIn("terminal-native-sspi", report["unverified"])
+        for changed in ('', good * 2, '<testcase name="terminal-windows-sspi-negative"><failure/></testcase>',
+                        '<testcase name="terminal-windows-sspi-negative"><error/></testcase>',
+                        '<testcase name="terminal-windows-sspi-negative"><skipped/></testcase>',
+                        '<testcase name="terminal-windows-sspi-negative" status="disabled"/>',
+                        '<testcase name="terminal-windows-sspi-negative" status="notrun"/>'):
+            path.write_text('<testsuite>' + native + changed + '</testsuite>', encoding="utf-8")
+            with self.subTest(changed=changed), self.assertRaises(ValidationError):
+                inspect_results(path, require_sspi_negative=True)
 
     def test_pageant_requires_exact_registration_and_actual_results(self):
         path = self.root / "pageant-results.xml"

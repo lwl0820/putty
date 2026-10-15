@@ -10,7 +10,7 @@
 #define PIN_CAP 128
 struct suite_private_hive {
     wchar_t temporary[PATH_CAP], root[PATH_CAP], hive[PATH_CAP], seed[PATH_CAP];
-    DWORD thread;
+    volatile LONG thread;
     void *token_user;
     PSID user;
     BYTE system[SECURITY_MAX_SID_SIZE];
@@ -232,7 +232,7 @@ static DWORD allocate(const wchar_t *temporary, suite_private_hive **result, int
         return ERROR_NOT_ENOUGH_MEMORY;
     }
     context->reserved = reserve;
-    context->thread = GetCurrentThreadId();
+    context->thread = (LONG)GetCurrentThreadId();
     DWORD error = canonical(temporary, context->temporary);
     const wchar_t *last = wcsrchr(context->temporary, L'\\');
     if (!error && (!last || _wcsicmp(last + 1, L".tmp"))) error = ERROR_BAD_PATHNAME;
@@ -282,7 +282,26 @@ static DWORD seed_file(suite_private_hive *context)
     return error;
 }
 int suite_hive_ready(const suite_private_hive *context)
-{ return context && context->thread == GetCurrentThreadId() && context->mapped && context->key; }
+{ return context && (DWORD)InterlockedCompareExchange((volatile LONG *)&context->thread, 0, 0) == GetCurrentThreadId() && context->mapped && context->key; }
+DWORD suite_hive_release_owner(suite_private_hive *context)
+{
+    if (!suite_hive_ready(context)) return ERROR_INVALID_STATE;
+    LONG current = (LONG)GetCurrentThreadId();
+    return InterlockedCompareExchange(&context->thread, 0, current) == current ?
+        ERROR_SUCCESS : ERROR_INVALID_STATE;
+}
+DWORD suite_hive_claim_owner(suite_private_hive *context)
+{
+    if (!context) return ERROR_INVALID_STATE;
+    LONG current = (LONG)GetCurrentThreadId();
+    /* 先取得操作权，才读取会由所有者修改的 mapped/key；失败竞争者不访问它们。 */
+    if (InterlockedCompareExchange(&context->thread, current, 0) != 0) return ERROR_BUSY;
+    if (!context->mapped || !context->key) {
+        InterlockedExchange(&context->thread, 0);
+        return ERROR_INVALID_STATE;
+    }
+    return ERROR_SUCCESS;
+}
 const wchar_t *suite_hive_root(const suite_private_hive *context) { return context ? context->root : NULL; }
 const wchar_t *suite_hive_seed(const suite_private_hive *context) { return context ? context->seed : NULL; }
 HKEY suite_hive_key(const suite_private_hive *context) { return suite_hive_ready(context) ? context->key : NULL; }
@@ -317,7 +336,7 @@ static DWORD prove_mapping(suite_private_hive *context)
 
 DWORD suite_hive_resume(suite_private_hive *context)
 {
-    if (!context || context->thread != GetCurrentThreadId()) return ERROR_INVALID_PARAMETER;
+    if (!context || (DWORD)InterlockedCompareExchange(&context->thread, 0, 0) != GetCurrentThreadId()) return ERROR_INVALID_PARAMETER;
     if (context->mapped || context->key) return ERROR_ALREADY_INITIALIZED;
     if (!context->reserved) {
         if (InterlockedCompareExchange(&mapping_slot, 1, 0)) return ERROR_BUSY;
@@ -349,7 +368,7 @@ DWORD suite_hive_resume(suite_private_hive *context)
 }
 DWORD suite_hive_pause(suite_private_hive *context)
 {
-    if (!context || context->thread != GetCurrentThreadId()) return ERROR_INVALID_PARAMETER;
+    if (!context || (DWORD)InterlockedCompareExchange(&context->thread, 0, 0) != GetCurrentThreadId()) return ERROR_INVALID_PARAMETER;
     if (!context->mapped && !context->key) return ERROR_SUCCESS;
     DWORD error = ERROR_SUCCESS;
     if (context->mapped) {

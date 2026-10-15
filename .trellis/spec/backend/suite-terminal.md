@@ -16,7 +16,7 @@ void TerminalController::close();
 
 `pt_terminal.h` 是自有 C 边界。`pt_options` 仅在进程内携带固定绘制入口，不能持久化；`pt_connection` 携带固定容量的 UTF-8 字段。`pt_packet` 包含 magic、type、render_generation、尺寸／状态参数、length 和 revision，尾随恰好 length 字节。跨线程消息不含 Terminal、Conf、Backend、QFont 或私钥对象。
 
-密钥路径经 `pt_filename_from_utf8` 转为正式 Filename：Windows 使用上游 `filename_from_utf8`，Unix 保留原路径字节构造。不能把 Qt 的 UTF-8 路径交给 Windows 按 ANSI 代码页解释的 `filename_from_str`。原生平台用例核对中文及空格路径的宽字符结果，真实认证另用同类路径读出实际 PPK。
+密钥路径经 `pt_filename_from_utf8` 转为正式 Filename：Windows 使用上游已公开声明的 `decode_utf8_to_wide_string` 和 `filename_from_wstr`，并释放临时宽字符缓冲；Unix 保留原路径字节构造。不能把 Qt 的 UTF-8 路径交给 Windows 按 ANSI 代码页解释的 `filename_from_str`。上游实现文件内的 `filename_from_utf8` 没有公共声明，不能直接跨翻译单元调用；自有平台适配 C 源在 MSVC 下将 C4013 作为编译错误，避免隐式 `int` 截断 x64 指针。原生平台用例核对中文及空格路径的宽字符结果，真实认证另用同类路径读出实际 PPK。
 
 ## 3. 所有权、顺序和容量
 
@@ -27,6 +27,7 @@ void TerminalController::close();
 - `renderRequest_`／`inputRequest_` 只有非零才表示在途。OPEN、GET_SCREEN等无请求号命令的完成事件可能为0，不能以0匹配并提交尚未设置的配置。
 - 主机密钥、弱算法及日志确认使用核心请求号；拒绝或关闭只完成／撤销一次。同步 PPK 解密、GSS 网络调用仍在核心线程，GUI 保持事件循环，关闭不等待计算完成。
 - GSS MIC 输出先清零，只有成功且非空才写包；包复制后用所属库 `free_mic` 释放。失败输出即使带缓冲也须归还，两种调用者均明确终止，不能把空包入队。
+- SSPI 上下文初始化先给过期时间／寿命确定默认值，只在成功或继续状态转换系统时间戳；失败时不读取 API 未保证填写的输出。原文窄夹具与真实系统无效句柄负例分别记录，均不能替代 Kerberos 正向认证或长调用验证。
 
 ## 4. 错误矩阵
 

@@ -1,0 +1,28 @@
+diff --git a/windows/gss.c b/windows/gss.c
+index e28993d..e0b2c80 100644
+--- a/windows/gss.c
++++ b/windows/gss.c
+@@ -459,6 +459,11 @@ static Ssh_gss_stat ssh_sspi_init_sec_context(struct ssh_gss_library *lib,
+     ULONG ret_flags=0;
+     TimeStamp localexp;
+ 
++    if (expiry)
++        *expiry = GSS_NO_EXPIRATION;
++    if (lifetime)
++        *lifetime = 0;
++
+     /* check if we have to delegate ... */
+     if (to_deleg) flags |= ISC_REQ_DELEGATE;
+     winctx->maj_stat = p_InitializeSecurityContextA(&winctx->cred_handle,
+@@ -474,7 +479,10 @@ static Ssh_gss_stat ssh_sspi_init_sec_context(struct ssh_gss_library *lib,
+                                                     &ret_flags,
+                                                     &localexp);
+ 
+-    localexp_to_exp_lifetime(&localexp, expiry, lifetime);
++    /* 失败返回不保证提供有效时间戳，只转换本适配接受的成功状态。 */
++    if (winctx->maj_stat == SEC_E_OK ||
++        winctx->maj_stat == SEC_I_CONTINUE_NEEDED)
++        localexp_to_exp_lifetime(&localexp, expiry, lifetime);
+ 
+     /* prepare for the next round */
+     winctx->context_handle = &winctx->context;

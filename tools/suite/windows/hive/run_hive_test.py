@@ -14,7 +14,7 @@ from support import TEMPORARY_ROOT, ValidationError, project_path, write_report 
 
 CHECKS = {"private-acl", "app-hive-create", "hkcu-handle-marker", "reload-persistence",
           "child-not-inherited", "child-explicit-init", "private-seed-file",
-          "permissions-closed", "single-mapping-and-path-guard", "cleanup"}
+          "permissions-closed", "single-mapping-and-path-guard", "owner-handoff", "continuous-mapping", "cleanup"}
 
 
 def decode_report(output):
@@ -81,7 +81,7 @@ def main():
     try:
         report = run(arguments.binary, arguments.parent)
         write_report(directory, "private-hive.json", report)
-        print("私有 app hive：10 项隔离检查通过；上游存储、种子与 PRNG 未运行")
+        print(f"私有 app hive：{len(CHECKS)} 项隔离检查通过；上游存储、种子与 PRNG 未运行")
         return 0
     except (ValidationError, OSError, subprocess.SubprocessError) as error:
         write_report(directory, "private-hive.json",

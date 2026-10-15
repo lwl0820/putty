@@ -14,8 +14,22 @@
 #include <cstring>
 #include <functional>
 #include <stdexcept>
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+#include "windows/hive_bootstrap.h"
+#include <QSettings>
+#endif
 
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+#define CHECK(value) do { if (!(value)) { \
+    std::fprintf(stderr, "终端测试检查失败：行=%d\n", __LINE__); std::fflush(stderr); \
+    throw std::runtime_error(#value); } } while (0)
+static void guardedStage(const char *stage)
+{
+    std::fprintf(stderr, "终端测试阶段：%s\n", stage); std::fflush(stderr);
+}
+#else
 #define CHECK(value) do { if (!(value)) throw std::runtime_error(#value); } while (0)
+#endif
 static bool until(const std::function<bool()> &predicate, int timeout = 15000)
 {
     QElapsedTimer clock; clock.start();
@@ -31,7 +45,11 @@ static void copy(char *target, size_t size, const QString &text)
 }
 static pt_render_config rendering(uint64_t generation = 1)
 {
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+    pt_render_config config = {generation, 80, 24, 14, 96, 1000, "Consolas"};
+#else
     pt_render_config config = {generation, 80, 24, 14, 96, 1000, "Liberation Mono"};
+#endif
     return config;
 }
 struct Observation {
@@ -110,7 +128,9 @@ static QJsonObject workload(const pt_connection &connection, const QByteArray &p
     CHECK(until([&] { return controller.isReady(); }));
     CHECK(controller.open(connection) == PR_OK);
     CHECK(until([&] { return seen.started || !seen.errors.isEmpty(); }, 15000));
+#ifndef PUTTY_TERMINAL_WINDOWS_GUARDED
     if (!seen.errors.isEmpty()) std::fprintf(stderr, "%s\n", qPrintable(seen.errors.join('\n')));
+#endif
     CHECK(seen.errors.isEmpty()); CHECK(seen.started);
     CHECK(controller.renderGeneration() == 1);
     if (gss) {
@@ -126,7 +146,11 @@ static QJsonObject workload(const pt_connection &connection, const QByteArray &p
     /* 消费者短暂停顿让完整帧队列饱和；恢复后仍必须得到最终完整屏幕。 */
     QThread::msleep(80);
     auto highDpi = rendering(2); highDpi.dpi = 144; highDpi.dpr_milli = 2000;
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+    copy(highDpi.font_family, sizeof(highDpi.font_family), QStringLiteral("Courier New"));
+#else
     copy(highDpi.font_family, sizeof(highDpi.font_family), QStringLiteral("DejaVu Sans Mono"));
+#endif
     CHECK(controller.configure(highDpi) == PR_OK);
     CHECK(until([&] { return controller.frameGeneration() == 2; }));
     const QImage immutable = controller.frame();
@@ -139,6 +163,9 @@ static QJsonObject workload(const pt_connection &connection, const QByteArray &p
     CHECK(controller.renderGeneration() == 2);
     CHECK(seen.screen.contains("FINAL")); CHECK(seen.screen.contains("INPUT_OK"));
     CHECK(seen.screen.contains(QByteArray::fromHex("e4b8ade69687")));
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+    CHECK(seen.screen.contains(QByteArray::fromHex("f09f9880")));
+#endif
     CHECK(seen.metricsQueries > 0); CHECK(seen.families.size() >= 2);
     CHECK(controller.frameGeneration() == 2);
     CHECK(controller.frame().devicePixelRatio() == 2);
@@ -222,12 +249,16 @@ static QJsonObject orderedInputDuringAuthentication(pt_connection connection, co
     QByteArray expected("BEGIN");
     for (int i = 0; i < 64; ++i) expected += QByteArray("\x1b[Ax");
     for (int i = 0; i < 127; ++i) expected += QByteArray("\x1b[D");
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+    const auto program = QStringLiteral("suite-terminal-ordered-input-v1");
+#else
     const auto program = QStringLiteral(
         "/usr/bin/python3 -B -c 'import os\nexpected=bytes.fromhex(\"%1\")\ndata=b\"\"\n"
         "while len(data)<len(expected):\n chunk=os.read(0,len(expected)-len(data))\n"
         " if not chunk: raise SystemExit(8)\n data+=chunk\n"
         "os.write(1,b\"ORDER_OK\" if data==expected else b\"ORDER_BAD\")\n"
         "raise SystemExit(0 if data==expected else 9)'").arg(QString::fromLatin1(expected.toHex()));
+#endif
     memset(connection.command, 0, sizeof(connection.command));
     copy(connection.command, sizeof(connection.command), program);
     TerminalController controller(rendering()); Observation seen;
@@ -289,14 +320,31 @@ static QJsonObject closeDuringGSS(const pt_connection &connection, const QString
     return {{"close_call_ms", callTime}, {"safe_cleanup_ms", delay.elapsed()},
         {"heartbeats_while_closing", heartbeats}, {"maximum_heartbeat_ms", maximum}};
 }
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+int terminal_test_entry(int argc, char **argv)
+#else
 int main(int argc, char **argv)
+#endif
 {
     const QString isolated = qEnvironmentVariable("PUTTY_TERMINAL_ISOLATED_ROOT");
     const QString canonical = QFileInfo(isolated).canonicalFilePath();
     if (canonical.isEmpty() || !canonical.startsWith(QStringLiteral(PUTTY_TERMINAL_PROJECT_TMP) + '/')) {
         std::fputs("必须通过项目私有隔离运行器启动终端测试\n", stderr); return 1;
     }
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+    guardedStage("Qt 偏好隔离");
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    for (auto scope : {QSettings::UserScope, QSettings::SystemScope})
+        QSettings::setPath(QSettings::IniFormat, scope, isolated + "/config");
+#endif
     QApplication app(argc, argv); QFontDatabase::families();
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+    guardedStage("Qt 初始化完成");
+    /* 全部核心已安全关闭后在 QApplication 析构前接回操作权；映射从未解除。 */
+    struct MainHiveOwner {
+        ~MainHiveOwner() { if (suite_terminal_claim_main()) std::terminate(); }
+    } mainHiveOwner;
+#endif
     QCommandLineParser parser;
     for (const char *name : {"port", "key", "remote-command", "passphrase-file", "mode", "kdc-marker"})
         parser.addOption({QString::fromLatin1(name), QString(), QStringLiteral("value")});
@@ -309,6 +357,11 @@ int main(int argc, char **argv)
         copy(connection.command, sizeof(connection.command), parser.value("remote-command"));
         connection.port = parser.value("port").toInt();
         const auto mode = parser.value("mode");
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+        CHECK(mode.isEmpty());
+        CHECK(parser.value("remote-command") == QStringLiteral("suite-terminal-workload-v1"));
+        CHECK(connection.port >= 1 && connection.port <= 65535);
+#endif
         if (mode == "render-bounds") {
             renderBounds();
             std::puts("终端：宽图像按总像素限额呈现通过");
@@ -326,10 +379,25 @@ int main(int argc, char **argv)
             else if (mode == "gss-close") close = closeDuringGSS(connection, parser.value("kdc-marker"));
             else CHECK(false);
         } else {
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+            guardedStage("主机密钥拒绝");
+#endif
             rejectHostKey(connection);
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+            guardedStage("真实密钥负载与呈现");
+#endif
             load = workload(connection, passphrase, isolated);
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+            guardedStage("密钥计算中关闭");
+#endif
             close = closeDuringAuthentication(connection, passphrase);
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+            guardedStage("口令提示取消");
+#endif
             closeAtPrompt(connection);
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+            guardedStage("有序输入与背压");
+#endif
             orderedInput = orderedInputDuringAuthentication(connection, passphrase);
         }
         passphrase.fill('\0');
@@ -339,11 +407,26 @@ int main(int argc, char **argv)
             {"ordered_input", orderedInput},
             {"host_key_rejection", !gss}, {"prompt_cancellation", !gss},
             {"windows_native_verified", false}, {"gss_verified", gss}};
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+        report.insert("windows_guarded_ppk", true);
+        report.insert("non_bmp_screen_verified", true);
+        report.insert("client_build_config", QStringLiteral(PUTTY_TERMINAL_BUILD_CONFIG));
+        report.insert("client_compiler", QStringLiteral(PUTTY_TERMINAL_COMPILER));
+#endif
         CHECK(output.write(QJsonDocument(report).toJson()) > 0);
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+        guardedStage("终端摘要完成");
+#else
         std::puts(gss ? "终端：真实 GSS／KDC 延迟与 GUI 响应通过" :
                         "终端：真实 SSH／PPK、十秒心跳、Unicode／DPI 帧及异步关闭通过");
+#endif
         return 0;
     } catch (const std::exception &error) {
+#ifdef PUTTY_TERMINAL_WINDOWS_GUARDED
+        (void)error;
+        std::fputs("终端纵切失败：检查未通过\n", stderr); return 1;
+#else
         std::fprintf(stderr, "终端纵切失败：%s\n", error.what()); return 1;
+#endif
     }
 }

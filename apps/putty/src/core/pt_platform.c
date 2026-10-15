@@ -1,5 +1,10 @@
 #include "pt_platform.h"
 
+#ifdef _MSC_VER
+/* 未声明函数的隐式 int 会截断 x64 指针，必须在此适配层编译时拒绝。 */
+#pragma warning(error: 4013)
+#endif
+
 #ifndef _WINDOWS
 /* Unix 保持此纵切原有的离屏默认值，不从 Xresources 覆盖。 */
 char *platform_default_s(const char *name) { (void)name; return NULL; }
@@ -15,7 +20,11 @@ char *platform_get_x_display(void) { return dupstr(getenv("DISPLAY")); }
 Filename *pt_filename_from_utf8(const char *path)
 {
 #ifdef _WINDOWS
-    return filename_from_utf8(path);
+    /* filename_from_utf8 仅在上游实现文件内使用，没有公共声明。 */
+    wchar_t *wide_path = decode_utf8_to_wide_string(path);
+    Filename *filename = filename_from_wstr(wide_path);
+    sfree(wide_path);
+    return filename;
 #else
     return filename_from_str(path);
 #endif

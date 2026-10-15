@@ -78,6 +78,69 @@ static DWORD seed_configuration(suite_private_hive *context)
     }
     return error;
 }
+typedef struct handoff_test {
+    suite_private_hive *context;
+    const wchar_t *marker;
+    HANDLE checked, start, claimed, finish;
+} handoff_test;
+static DWORD WINAPI handoff_worker(void *parameter)
+{
+    handoff_test *test = parameter;
+    CHECK(!suite_hive_ready(test->context) && !suite_hive_key(test->context));
+    CHECK(suite_hive_release_owner(test->context) == ERROR_INVALID_STATE);
+    CHECK(suite_hive_claim_owner(test->context) == ERROR_BUSY);
+    CHECK(suite_hive_pause(test->context) == ERROR_INVALID_PARAMETER);
+    CHECK(suite_hive_close(test->context) == ERROR_INVALID_PARAMETER);
+    CHECK(SetEvent(test->checked));
+    CHECK(WaitForSingleObject(test->start, 5000) == WAIT_OBJECT_0);
+    OK(suite_hive_claim_owner(test->context));
+    CHECK(suite_hive_ready(test->context));
+    CHECK(suite_hive_claim_owner(test->context) == ERROR_BUSY);
+    OK(read_marker(HKEY_CURRENT_USER, test->marker, L"Parent", 0x51a7));
+    OK(write_marker(HKEY_CURRENT_USER, test->marker, L"Worker", 0x7ead));
+    OK(read_marker(suite_hive_key(test->context), test->marker, L"Worker", 0x7ead));
+    CHECK(SetEvent(test->claimed));
+    CHECK(WaitForSingleObject(test->finish, 5000) == WAIT_OBJECT_0);
+    OK(suite_hive_release_owner(test->context));
+    CHECK(!suite_hive_ready(test->context));
+    return 0;
+}
+static int owner_handoff(suite_private_hive *context, const wchar_t *marker, const wchar_t *parent)
+{
+    handoff_test test = {context, marker, NULL, NULL, NULL, NULL};
+    test.checked = CreateEventW(NULL, TRUE, FALSE, NULL);
+    test.start = CreateEventW(NULL, TRUE, FALSE, NULL);
+    test.claimed = CreateEventW(NULL, TRUE, FALSE, NULL);
+    test.finish = CreateEventW(NULL, TRUE, FALSE, NULL);
+    CHECK(test.checked && test.start && test.claimed && test.finish);
+    HANDLE worker = CreateThread(NULL, 0, handoff_worker, &test, 0, NULL);
+    CHECK(worker != NULL);
+    CHECK(WaitForSingleObject(test.checked, 5000) == WAIT_OBJECT_0);
+    OK(suite_hive_release_owner(context));
+    CHECK(!suite_hive_ready(context) && !suite_hive_key(context));
+    CHECK(suite_hive_release_owner(context) == ERROR_INVALID_STATE);
+    /* 无所有者期间仍通过 HKCU 读写同一随机标记；没有 pause/resume 空窗。 */
+    OK(read_marker(HKEY_CURRENT_USER, marker, L"Parent", 0x51a7));
+    suite_private_hive *second = NULL;
+    CHECK(suite_hive_create(temporary, parent, &second) == ERROR_BUSY && !second);
+    CHECK(SetEvent(test.start));
+    CHECK(WaitForSingleObject(test.claimed, 5000) == WAIT_OBJECT_0);
+    CHECK(!suite_hive_ready(context) && !suite_hive_key(context));
+    CHECK(suite_hive_claim_owner(context) == ERROR_BUSY);
+    CHECK(suite_hive_release_owner(context) == ERROR_INVALID_STATE);
+    OK(read_marker(HKEY_CURRENT_USER, marker, L"Worker", 0x7ead));
+    CHECK(suite_hive_cleanup(temporary, suite_hive_root(context)) == ERROR_BUSY);
+    CHECK(SetEvent(test.finish));
+    CHECK(WaitForSingleObject(worker, 5000) == WAIT_OBJECT_0);
+    DWORD exit_code;
+    CHECK(GetExitCodeThread(worker, &exit_code) && exit_code == 0);
+    CHECK(CloseHandle(worker));
+    CHECK(CloseHandle(test.checked) && CloseHandle(test.start) && CloseHandle(test.claimed) && CloseHandle(test.finish));
+    OK(suite_hive_claim_owner(context));
+    CHECK(suite_hive_ready(context));
+    OK(read_marker(suite_hive_key(context), marker, L"Worker", 0x7ead));
+    return 0;
+}
 static DWORD child(const wchar_t *mode, const wchar_t *root, const wchar_t *marker)
 {
     wchar_t binary[PATH_CAP], command[PATH_CAP * 4];
@@ -169,9 +232,12 @@ int wmain(int argc, wchar_t **argv)
     OK(write_marker(HKEY_CURRENT_USER, marker, L"Parent", 0x51a7));
     OK(read_marker(suite_hive_key(context), marker, L"Parent", 0x51a7));
     OK(seed_configuration(context));
+    CHECK(owner_handoff(context, marker, argv[2]) == 0);
     OK(child(L"--unmapped", root, marker));
     OK(suite_hive_pause(context));
     CHECK(!suite_hive_ready(context) && suite_hive_key(context) == NULL);
+    CHECK(suite_hive_release_owner(context) == ERROR_INVALID_STATE);
+    CHECK(suite_hive_claim_owner(context) == ERROR_BUSY);
     CHECK(reject_unprotected_seed(context) == 0);
     /* REG_PROCESS_APPKEY 不并发共享；父进程解除映射并关闭全部键后子进程显式加载。 */
     OK(child(L"--open", root, marker));
@@ -189,7 +255,7 @@ int wmain(int argc, wchar_t **argv)
     CHECK(GetFileAttributesW(root) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND);
     puts("{\"schema\":1,\"kind\":\"private-hive\",\"passed\":true,"
          "\"checks\":[\"private-acl\",\"app-hive-create\",\"hkcu-handle-marker\",\"reload-persistence\","
-         "\"child-not-inherited\",\"child-explicit-init\",\"private-seed-file\",\"permissions-closed\",\"single-mapping-and-path-guard\",\"cleanup\"],"
+         "\"child-not-inherited\",\"child-explicit-init\",\"private-seed-file\",\"permissions-closed\",\"single-mapping-and-path-guard\",\"owner-handoff\",\"continuous-mapping\",\"cleanup\"],"
          "\"upstream_storage\":\"not-run\",\"upstream_seed\":\"not-run\",\"prng\":\"not-run\"}");
     return 0;
 }

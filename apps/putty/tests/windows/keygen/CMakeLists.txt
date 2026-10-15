@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.24)
+project(suite_terminal_keygen LANGUAGES C)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+if(NOT DEFINED PUTTY_SOURCE_DIR OR NOT EXISTS "${PUTTY_SOURCE_DIR}/apps/puttygen/src/core/pg_core.c")
+  message(FATAL_ERROR "必须显式传入本仓库源码根")
+endif()
+# 独立进程复用正式密钥核心构建，不与套件完整核心混合，也不查找 Qt。
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(PG_BUILD_GUI OFF CACHE BOOL "" FORCE)
+add_subdirectory("${PUTTY_SOURCE_DIR}/apps/puttygen" pg-core-build)
+add_executable(suite-terminal-keygen keygen.c)
+target_link_libraries(suite-terminal-keygen PRIVATE pg-core pg-putty)
+target_compile_definitions(suite-terminal-keygen PRIVATE
+  SUITE_TERMINAL_KEYGEN_CONFIG="$<CONFIG>"
+  SUITE_TERMINAL_KEYGEN_COMPILER="${CMAKE_C_COMPILER_ID}")
+if(MSVC)
+  target_compile_options(suite-terminal-keygen PRIVATE /utf-8 /UNDEBUG /W4 /we4013)
+  target_link_options(suite-terminal-keygen PRIVATE "/MAP:$<TARGET_FILE:suite-terminal-keygen>.map")
+else()
+  target_compile_options(suite-terminal-keygen PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+endif()

@@ -1,6 +1,7 @@
 #include "core/pt_platform.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include "test_diagnostics.h"
 
 #define CHECK(value) do { if (!(value)) { \
     fprintf(stderr, "Windows 终端平台回归失败，第 %d 行：%s\n", __LINE__, #value); \
@@ -66,10 +67,14 @@ static int check_oem_modes(void)
 
 int main(void)
 {
+    terminal_test_diagnostics();
+    terminal_test_stage("检查 OEM 字符集模式");
     CHECK(check_oem_modes() == 0);
+    terminal_test_stage("核对 UTF-8 中文路径");
     Filename *utf8_key = pt_filename_from_utf8("文件 密钥.ppk");
     CHECK(!wcscmp(filename_to_wstr(utf8_key), L"文件 密钥.ppk"));
     filename_free(utf8_key);
+    terminal_test_stage("初始化正式 Windows Unicode 表");
     /* 只创建所需的显式配置字段，禁止通过 do_defaults 读取注册表。 */
     Conf *conf = conf_new();
     conf_set_str(conf, CONF_line_codepage, "UTF-8");
@@ -88,6 +93,7 @@ int main(void)
     for (size_t table = 0; table < lenof(tables); ++table)
         for (size_t i = 0; i < 256; ++i) CHECK(!DIRECT_FONT(tables[table][i]));
     FontSpec *font = platform_default_fontspec("Font");
+    terminal_test_stage("核对正式 Windows 默认配置");
     CHECK(!strcmp(font->name, "Courier New") && font->height == 10);
     fontspec_free(font);
     Filename *log = platform_default_filename("LogFileName");
@@ -98,6 +104,7 @@ int main(void)
     sfree(serial);
     /* OEMONLY 仍使用正式 CP437 分支，输入自动值仍回退当前 ACP。 */
     conf_set_int(conf, CONF_vtmode, VT_OEMONLY);
+    terminal_test_stage("核对正式 OEMONLY 回退");
     conf_set_str(conf, CONF_line_codepage, "not-a-codepage");
     pt_init_unicode(conf, &unicode);
     CHECK(unicode.font_codepage == 437 && unicode.line_codepage == (int)GetACP());

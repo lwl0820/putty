@@ -31,6 +31,15 @@ jobs:
           arch: x64
       - name: 固定构建工具版本
         run: python -m pip install cmake==3.30.9 ninja==1.11.1.1
+      - name: 准备并验证受控 SSH 对端
+        shell: pwsh
+        run: |
+          python -m venv .tmp/windows-ci/ssh-peer-venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .tmp/windows-ci/ssh-peer-venv/Scripts/python.exe -m pip install -r tools/suite/windows/ssh_peer_tests/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .tmp/windows-ci/ssh-peer-venv/Scripts/python.exe -B -m unittest discover -s tools/suite/windows/ssh_peer_tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: 检查公共脚本与证据拒绝门
         shell: pwsh
         run: |
@@ -83,7 +92,7 @@ jobs:
       - name: 构建共享运行时、两个 GUI 和三个 CLI
         shell: pwsh
         run: |
-          cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PAGEANT=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
+          cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPython3_EXECUTABLE="$PWD/.tmp/windows-ci/ssh-peer-venv/Scripts/python.exe" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PAGEANT=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build .tmp/build/windows-release --parallel 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -97,7 +106,15 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$PWD/.tmp/qt/bin;$env:PATH"
-          python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage --require-terminal --require-pageant
+          # 仅诊断两个无存储宿主；直接打印退出码可区分加载失败与运行期异常。
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          foreach ($probe in @('putty-terminal-cpu-tests.exe', 'putty-terminal-platform-tests.exe')) {
+            & "$PWD/.tmp/build/windows-release/apps/putty/tests/$probe"
+            Write-Host "终端无存储宿主 $probe 的实际退出码：$LASTEXITCODE"
+          }
+          # Windows 离屏插件使用 FreeType；正式测试显式使用系统字体目录。
+          $env:QT_QPA_FONTDIR = Join-Path $env:WINDIR 'Fonts'
+          python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage --require-terminal --require-pageant --require-terminal-ssh --require-sspi-negative
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # 只上传明确报告和合法程序，禁止扩为 .tmp 或整个 runtime/cache/hive 树。
       - uses: actions/upload-artifact@v4
@@ -114,6 +131,7 @@ jobs:
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-hive-tests.exe
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-storage-tests.exe
             .tmp/build/windows-release/apps/pageant/tests/pageant-windows-ipc-tests.exe
+            .tmp/build/windows-release/apps/putty/tests/putty-sspi-native-negative-tests.exe
             .tmp/windows-ci/install-release/bin/plink.exe
             .tmp/windows-ci/install-release/bin/pscp.exe
             .tmp/windows-ci/install-release/bin/psftp.exe

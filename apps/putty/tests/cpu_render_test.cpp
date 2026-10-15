@@ -9,6 +9,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
+#include "test_diagnostics.h"
 
 #define CHECK(value) do { if (!(value)) throw std::runtime_error(#value); } while (0)
 
@@ -22,6 +23,7 @@ struct Probe {
     std::vector<Delivery> deliveries;
     int rejected = 0;
     std::atomic_bool finished{false};
+    std::atomic<const char *> callbackFailure{nullptr};
     QString failure;
 };
 
@@ -29,19 +31,30 @@ extern "C" pr_status pt_publish(pr_core *core, pt_packet header, const void *dat
                                  size_t size, uint64_t request)
 {
     auto &probe = *reinterpret_cast<Probe *>(core);
-    CHECK(QThread::currentThread() != probe.gui && request == 0);
-    CHECK(size <= 16 * 1024 * 1024);
+    if (QThread::currentThread() == probe.gui || request != 0 || size > 16 * 1024 * 1024) {
+        probe.callbackFailure = "发布回调的线程、请求或容量非法";
+        return PR_PLATFORM_ERROR;
+    }
     if (header.type == PT_FRAME && probe.rejected < 2) {
         ++probe.rejected;
         return PR_BACKPRESSURE;
     }
-    Delivery delivery{header, QByteArray(static_cast<const char *>(data), qsizetype(size))};
-    CHECK(QMetaObject::invokeMethod(&probe.receiver,
-        [&probe, delivery = std::move(delivery)]() mutable {
-            if (QThread::currentThread() != probe.gui)
-                probe.failure = QStringLiteral("图像未在接收者线程投递");
-            probe.deliveries.push_back(std::move(delivery));
-        }, Qt::QueuedConnection));
+    /* C 边界不能向 MSVC /EHc 的调用者传播 C++ 异常。 */
+    try {
+        Delivery delivery{header, QByteArray(static_cast<const char *>(data), qsizetype(size))};
+        if (!QMetaObject::invokeMethod(&probe.receiver,
+            [&probe, delivery = std::move(delivery)]() mutable {
+                if (QThread::currentThread() != probe.gui)
+                    probe.failure = QStringLiteral("图像未在接收者线程投递");
+                probe.deliveries.push_back(std::move(delivery));
+            }, Qt::QueuedConnection)) {
+            probe.callbackFailure = "无法排队投递图像";
+            return PR_PLATFORM_ERROR;
+        }
+    } catch (...) {
+        probe.callbackFailure = "发布回调发生 C++ 异常";
+        return PR_PLATFORM_ERROR;
+    }
     return PR_OK;
 }
 
@@ -61,15 +74,18 @@ static void draw(const pt_draw_ops &ops, void *renderer, const wchar_t *text, in
 
 static void render(Probe &probe, pt_render_config config)
 {
+    terminal_test_stage("工作线程创建 CPU 渲染器");
     const auto options = pt_cpu_options(config);
     const auto &ops = options.draw;
     void *renderer = ops.create(reinterpret_cast<pr_core *>(&probe), &config);
     CHECK(renderer);
+    terminal_test_stage("CPU 渲染器配置完成");
     try {
         auto invalid = config;
         invalid.columns = 241;
         CHECK(!ops.configure(renderer, &invalid));
         const wchar_t unicode[] = L"ASCII 中文 e\u0301 \U0001f642";
+        terminal_test_stage("绘制首个 Unicode 帧");
         draw(ops, renderer, unicode, int(sizeof(unicode) / sizeof(*unicode)) - 1);
         CHECK(ops.revision(renderer) == 1);
         draw(ops, renderer, L"SECOND", 6);
@@ -80,6 +96,7 @@ static void render(Probe &probe, pt_render_config config)
         config.columns = 240; config.rows = 2;
         config.dpi = 144; config.dpr_milli = 2000;
         CHECK(ops.configure(renderer, &config));
+        terminal_test_stage("绘制高 DPI 宽帧");
         draw(ops, renderer, unicode, int(sizeof(unicode) / sizeof(*unicode)) - 1);
         int width = 0, height = 0;
         ops.pixels(renderer, &width, &height);
@@ -94,8 +111,18 @@ static void render(Probe &probe, pt_render_config config)
 
 int main(int argc, char **argv)
 {
+    terminal_test_diagnostics();
+    terminal_test_stage("创建 QApplication");
     QApplication app(argc, argv);
-    QFontDatabase::families();
+    terminal_test_stage("枚举字体");
+    const auto families = QFontDatabase::families();
+    std::fprintf(stderr, "CPU 测试可用字体族：%lld\n", static_cast<long long>(families.size()));
+    std::fflush(stderr);
+    if (families.isEmpty()) {
+        std::fputs("CPU 渲染测试没有可用字体，无法验证 Unicode 绘制\n", stderr);
+        return 1;
+    }
+    terminal_test_stage("读取固定字体");
     Probe probe;
     pt_render_config config = {1, 80, 24, 14, 96, 1000, ""};
     const auto family = QFontDatabase::systemFont(QFontDatabase::FixedFont).family().toUtf8();
@@ -111,6 +138,7 @@ int main(int argc, char **argv)
         }, Qt::QueuedConnection);
     });
     worker->start();
+    terminal_test_stage("启动工作线程并处理 GUI 事件");
     QElapsedTimer timeout; timeout.start();
     while (!probe.finished && timeout.elapsed() < 10000) {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
@@ -121,7 +149,10 @@ int main(int argc, char **argv)
         return 1;
     }
     worker->wait(); delete worker;
+    terminal_test_stage("工作线程已完成，核对帧与度量");
     try {
+        if (probe.callbackFailure)
+            throw std::runtime_error(probe.callbackFailure.load());
         CHECK(probe.failure.isEmpty());
         CHECK(probe.rejected == 2);
         std::vector<Delivery> frames;

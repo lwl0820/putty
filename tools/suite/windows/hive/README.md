@@ -6,7 +6,9 @@
 
 `private_hive.h` 提供 `suite_hive_create(project_tmp, parent, &context)`、`suite_hive_open(project_tmp, root, &context)`、`suite_hive_pause/resume/close(context)`、`suite_hive_cleanup(project_tmp, root)`，返回 Win32 错误码。只有成功初始化后 `suite_hive_ready` 才为真；初始化会先证明 HKCU 写入的进程标记能从 app hive 原始句柄读取。失败必须停止后续存储和 PRNG 初始化。
 
-`suite_hive_root/seed` 返回借用路径；`suite_hive_key` 只在当前线程且映射活动时返回借用 HKEY。不能关闭该 HKEY；调用方创建的全部子键须在 pause/close 前关闭。一进程用原子槽限制为一个活动 HKCU 映射，第二个上下文在创建文件前返回 `ERROR_BUSY`。调用只能由初始化线程执行；线程限制不意味着 HKCU 覆盖只影响该线程。
+`suite_hive_root/seed` 返回借用路径；`suite_hive_key` 只在所有者线程且映射活动时返回借用 HKEY。不能关闭该 HKEY；调用方创建的全部子键须在 pause/close 或移交前关闭。一进程用原子槽限制为一个活动 HKCU 映射，第二个上下文在创建文件前返回 `ERROR_BUSY`。只有当前所有者可以修改上下文；线程限制不意味着 HKCU 覆盖只影响该线程。
+
+`suite_hive_release_owner` 原子释放操作权，`suite_hive_claim_owner` 只从无所有者状态取得操作权。移交保持原 HKCU 映射、HKEY 和进程槽；不能通过 pause/resume 在 QApplication 存活期间短暂恢复个人 HKCU。调用方必须串行传递上下文生命周期，移交期间不能 close/cleanup。非所有者释放、重复取得以及暂停态移交均被拒绝。
 
 `pause` 先 flush、恢复 HKCU、关闭本上下文 HKEY，再核查/收紧本私有根的 hive 及事务日志，最后释放进程映射槽。`close` 不删除文件，以便另一个进程显式加载；`cleanup` 也占用进程槽，存在活动映射时在删除任何文件之前返回 `ERROR_BUSY`，随后独立验证所有权、权限、路径、无链接后才删除平面运行文件与随机运行根。失败遗留的私有运行根不上传，也不通过放宽权限来清理。
 
@@ -32,7 +34,7 @@ CTest 名为 `runtime-windows-hive`，标签 `runtime;windows-hive`，超时 90 
 
 ## 证据与后续门
 
-原生宿主计划执行 10 个具名检查：实际私有 ACL、系统空 hive 创建、HKCU/句柄双向标记、关闭重载持久化、子进程不继承、子进程显式初始化、已有私有种子文件、权限不满足时拒绝、单映射/路径拒绝、结束清理。只有全部真正成功才输出 `passed: true`。Python 运行器要求完整检查集合、未遗留新运行根，并强制 `upstream_storage`、`upstream_seed`、`prng` 全为 `not-run`，`existing_tests_enabled: false`。
+原生宿主现在要求 12 个具名检查：实际私有 ACL、系统空 hive 创建、HKCU/句柄双向标记、关闭重载持久化、子进程不继承、子进程显式初始化、已有私有种子文件、权限不满足时拒绝、单映射/路径拒绝、所有者移交、连续映射、结束清理。新增的移交检查使用真实工作线程，核验主线程→工作线程→主线程的操作权及其间相同标记仍可见；两项尚待新 Windows CI 执行，不能沿用此前 10 项通过。只有全部真正成功才输出 `passed: true`。Python 运行器要求完整检查集合、未遗留新运行根，并强制 `upstream_storage`、`upstream_seed`、`prng` 全为 `not-run`，`existing_tests_enabled: false`。
 
 唯一可上传报告为 `.tmp/windows-hive-reports/private-hive.json`。不要上传 `windows-hive*/`、hive、seed 或日志树，也不要自动把此报告转换成旧 runtime/CLI 可运行许可。
 

@@ -593,6 +593,7 @@ static Ssh_gss_stat ssh_sspi_get_mic(struct ssh_gss_library *lib,
     SecBufferDesc InputBufferDescriptor;
     SecBuffer InputSecurityToken[2];
 
+    SSH_GSS_CLEAR_BUF(hash);
     if (winctx == NULL) return SSH_GSS_FAILURE;
 
     winctx->maj_stat = 0;
@@ -603,9 +604,10 @@ static Ssh_gss_stat ssh_sspi_get_mic(struct ssh_gss_library *lib,
                                                  SECPKG_ATTR_SIZES,
                                                  &ContextSizes);
 
-    if (winctx->maj_stat != SEC_E_OK ||
-        ContextSizes.cbMaxSignature == 0)
+    if (winctx->maj_stat != SEC_E_OK)
         return winctx->maj_stat;
+    if (ContextSizes.cbMaxSignature == 0)
+        return SSH_GSS_FAILURE;
 
     InputBufferDescriptor.cBuffers = 2;
     InputBufferDescriptor.pBuffers = InputSecurityToken;
@@ -625,6 +627,9 @@ static Ssh_gss_stat ssh_sspi_get_mic(struct ssh_gss_library *lib,
     if (winctx->maj_stat == SEC_E_OK) {
         hash->length = InputSecurityToken[1].cbBuffer;
         hash->value = InputSecurityToken[1].pvBuffer;
+    } else {
+        /* 失败时没有把所有权交给调用者，仍须归还临时签名缓冲。 */
+        sfree(InputSecurityToken[1].pvBuffer);
     }
 
     return winctx->maj_stat;

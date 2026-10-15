@@ -1,0 +1,13 @@
+diff --git a/vendor/putty/ssh/userauth2-client.c b/vendor/putty/ssh/userauth2-client.c
+index 2d7b274..65b2560 100644
+--- a/vendor/putty/ssh/userauth2-client.c
++++ b/vendor/putty/ssh/userauth2-client.c
+@@ -2575,6 +2575,8 @@ static PktOut *ssh2_userauth_gss_packet(
+         put_stringz(p, authtype);
+     }
+     put_string(p, mic.value, mic.length);
++    /* 数据已复制进 SSH 包，立即归还 GSS／SSPI 库拥有的 MIC 缓冲。 */
++    s->shgss->lib->free_mic(s->shgss->lib, &mic);
+ 
+     return p;
+ }

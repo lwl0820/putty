@@ -1,0 +1,84 @@
+name: 套件 Ubuntu 实际互操作检查
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu:
+    name: Ubuntu ${{ matrix.version }} Qt 6.8.3 x64
+    runs-on: ubuntu-${{ matrix.version }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['22.04', '24.04']
+        include:
+          - version: '22.04'
+            cc: gcc-11
+            cxx: g++-11
+          - version: '24.04'
+            cc: gcc-13
+            cxx: g++-13
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      LC_ALL: C.UTF-8
+      PYTHONIOENCODING: utf-8
+      PIP_CACHE_DIR: ${{ github.workspace }}/.tmp/pip-cache
+      TMPDIR: ${{ github.workspace }}/.tmp/temp
+      QT_QPA_PLATFORM: offscreen
+      PUTTY_SUITE_CONTAINER_TESTS: '1'
+      PUTTY_SUITE_GSS_TESTS: '1'
+      PUTTY_SUITE_GSS_PLINK: ${{ github.workspace }}/.tmp/build/suite-linux/suite-cli/plink
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备项目临时目录
+        run: mkdir -p .tmp/temp .tmp/linux-ci/reports
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装构建与真实认证依赖
+        run: |
+          sudo sh tools/ubuntu-build-dependencies.sh
+          sudo env DEBIAN_FRONTEND=noninteractive TMPDIR="$PWD/.tmp/temp" apt-get install -y --no-install-recommends openssh-server krb5-kdc krb5-user krb5-admin-server
+          python -m pip install cmake==3.30.9 ninja==1.11.1.1
+      - name: 准备匹配系统的断网 SSH 对端镜像
+        run: |
+          mkdir -m 700 .tmp/ci-docker
+          printf '{}\n' > .tmp/ci-docker/config.json
+          docker --host unix:///var/run/docker.sock --config "$PWD/.tmp/ci-docker" pull ubuntu:${{ matrix.version }}
+      - name: 检查构建脚本与实际结果拒绝门
+        run: |
+          python -B -m unittest discover -s tools/qt/tests -v
+          python -B -m unittest discover -s tools/suite/ci_tests -v
+      - uses: actions/cache@v4
+        with:
+          path: .tmp/qt
+          key: qt-6.8.3-${{ runner.os }}-ubuntu${{ matrix.version }}-${{ hashFiles('tools/qt/qt-sources.json', 'tools/qt/build_qt.py') }}
+      - name: 构建固定版本 Qt
+        run: |
+          if [ ! -f .tmp/qt/share/puttygen-gui/qt-sources/构建信息.json ]; then
+            python tools/qt/build_qt.py --prefix .tmp/qt --work .tmp/qt-build --jobs 4
+          fi
+      - name: 构建运行时与新增五个组件
+        run: |
+          cmake -S . -B .tmp/build/suite-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PAGEANT=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON -DPUTTY_SUITE_CONTAINER_TESTS=ON
+          cmake --build .tmp/build/suite-linux --parallel 4
+      - name: 验证受控 SSH 与 Kerberos 夹具
+        run: |
+          python -B -m unittest discover -s tools/suite/container_tests -v
+          python -B -m unittest discover -s tools/suite/gss_tests -v
+      - name: 执行并核对目标系统实际互操作
+        run: python -B tools/suite/run_linux_ci.py --build .tmp/build/suite-linux --report .tmp/linux-ci/reports/ctest.json
+      # 只上传用例摘要，不递归读取私钥、hive、缓存或原始运行根。
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: putty-suite-ubuntu${{ matrix.version }}-checks
+          path: .tmp/linux-ci/reports/*.json
+          if-no-files-found: warn

@@ -12,6 +12,8 @@
 
 修改公共运行时或产品 `pr_module` 时，还需阅读 [suite-runtime.md](suite-runtime.md) 的线程、容量、请求、通知代次与两阶段关闭契约。
 
+修改终端模块、CPU 渲染、帧消费或文本／按键输入时，还需阅读 [suite-terminal.md](suite-terminal.md)。该模块仍处于跨平台技术纵切验证阶段，不能据此视为完整 PuTTY 产品。
+
 修改私钥文件保存或 Windows 平台适配时，还需阅读 [private-file-permissions.md](private-file-permissions.md)。
 
 修改 Arch Linux 原生包、系统 Qt 安装或对应 Actions 时，还需阅读 [arch-package.md](arch-package.md)。

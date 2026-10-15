@@ -1,0 +1,12 @@
+--- a/unix/pageant.c
++++ b/unix/pageant.c
+@@ -233,7 +233,9 @@
+     /* Nothing needs doing in Unix Pageant */
+ }
+ 
++#ifndef PAGEANT_DIR_PREFIX
+ #define PAGEANT_DIR_PREFIX "/tmp/pageant"
++#endif
+ 
+ static bool time_to_die = false;
+ 

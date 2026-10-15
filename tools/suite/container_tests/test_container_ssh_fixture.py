@@ -15,7 +15,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from tools.suite.isolation import IsolationEnvironment, IsolationError  # noqa: E402
-from tools.suite.container_ssh_fixture import ContainerSSHServer, DEFAULT_CONTAINER_PARENT  # noqa: E402
+from tools.suite.container_ssh_fixture import ContainerSSHServer, DEFAULT_CONTAINER_PARENT, SYSTEM_PATH  # noqa: E402
 
 
 @unittest.skipUnless(sys.platform == "linux" and os.environ.get("PUTTY_SUITE_CONTAINER_TESTS") == "1",
@@ -37,22 +37,36 @@ class ContainerSSHFixtureTest(unittest.TestCase):
         self.assertEqual(report["log_driver"], "none")
         self.assertEqual(report["user"], f"{os.geteuid()}:{os.getegid()}")
         self.assertIn("no-new-privileges", report["security_options"])
+        system_sources = {Path(path).resolve() for path in ("/usr", "/bin", "/sbin", "/lib", "/lib64")
+                          if Path(path).is_dir()}
+        if Path("/etc/ld.so.cache").is_file():
+            system_sources.add(Path("/etc/ld.so.cache"))
+        mounted_system_sources = set()
         for mount in report["mounts"]:
             source = Path(mount["Source"])
-            if source == Path("/usr"):
+            if source in system_sources:
                 self.assertFalse(mount["RW"])
+                mounted_system_sources.add(source)
             else:
                 self.assertTrue(source.is_relative_to(self.environment.root), str(source))
+        self.assertEqual(mounted_system_sources, system_sources)
+        # 核对容器看到的真实程序和加载器字节，防止 Docker daemon 属于另一个宿主命名空间。
+        paths = [self.server.sshd, self.server.python, "/lib64/ld-linux-x86-64.so.2"]
+        expected = [hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in paths]
+        code = f"from pathlib import Path; import hashlib,json; print(json.dumps([hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in {paths!r}]))"
+        actual = self.server.run_exec(shlex.quote(self.server.python) + " -B -c " + shlex.quote(code))
+        self.assertEqual(actual.returncode, 0, actual.stderr)
+        self.assertEqual(json.loads(actual.stdout), expected)
         failed = self.server.run_exec("/usr/bin/touch /must-not-write")
         self.assertNotEqual(failed.returncode, 0)
 
     def test_dedicated_account_and_binary_stream_exit_status(self):
-        code = "import json,os,pwd; print(json.dumps([pwd.getpwuid(os.getuid()).pw_name,os.environ['HOME'],os.getcwd(),os.environ['TMPDIR']]))"
+        code = "import json,os,pwd; print(json.dumps([pwd.getpwuid(os.getuid()).pw_name,os.environ['HOME'],os.getcwd(),os.environ['TMPDIR'],os.environ['PATH']]))"
         result = self.server.run_exec("/usr/bin/python3 -B -c " + shlex.quote(code))
         self.assertEqual(result.returncode, 0, result.stderr)
         values = json.loads(result.stdout)
         self.assertEqual(values, ["suite", str(self.server.remote_home), str(self.server.remote_home),
-                                  str(self.environment.root / "temp")])
+                                  str(self.environment.root / "temp"), SYSTEM_PATH])
         code = "import os,sys; os.write(1,b'out\\x00\\xff'); os.write(2,b'err\\xfe'); sys.exit(7)"
         result = self.server.run_exec("/usr/bin/python3 -B -c " + shlex.quote(code))
         self.assertEqual(result.returncode, 7)

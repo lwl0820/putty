@@ -1,0 +1,18 @@
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets)
+add_library(putty-terminal STATIC
+  src/core/pt_terminal.c src/render/cpu_renderer.cpp
+  src/app/terminal_controller.cpp src/app/terminal_controller.h)
+target_include_directories(putty-terminal PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(putty-terminal PUBLIC putty-runtime Qt6::Widgets PRIVATE suite-putty)
+target_compile_features(putty-terminal PUBLIC cxx_std_17)
+set_target_properties(putty-terminal PROPERTIES AUTOMOC ON)
+add_executable(putty-qt src/app/main.cpp src/ui/terminal_window.cpp src/ui/terminal_window.h)
+target_link_libraries(putty-qt PRIVATE putty-terminal)
+set_target_properties(putty-qt PROPERTIES AUTOMOC ON)
+suite_add_backend_list(putty-qt PuTTY SSH SERIAL OTHERBACKENDS)
+if(WIN32)
+  set_target_properties(putty-qt PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()

@@ -5,9 +5,11 @@ import argparse
 import json
 import os
 from pathlib import Path
+import platform
 import shlex
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -24,6 +26,43 @@ except ImportError:
 
 DEFAULT_CONTAINER_PARENT = TEMPORARY_ROOT / "suite-container-fixture"
 LABEL = "org.putty-suite.ssh-fixture"
+SYSTEM_PATH = "/usr/bin:/usr/sbin:/bin:/sbin"
+SYSTEM_DIRECTORIES = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
+
+
+def _default_image(release):
+    if release.get("ID") == "arch":
+        return "archlinux:base"
+    if release.get("ID") == "ubuntu" and release.get("VERSION_ID") in ("22.04", "24.04"):
+        return "ubuntu:" + release["VERSION_ID"]
+    raise FixtureUnavailable("宿主系统没有默认匹配镜像；请显式传入 image= 或 --image，夹具不会拉取镜像")
+
+
+def _system_mounts():
+    """保留宿主程序和动态加载器布局；只接受系统目录及系统链接。"""
+    mounts = []
+    for name in SYSTEM_DIRECTORIES:
+        path = Path(name)
+        try:
+            information = path.stat()
+        except FileNotFoundError:
+            if name == "/usr":
+                raise FixtureUnavailable("宿主缺少 /usr 系统运行目录") from None
+            continue
+        source = path.resolve(strict=True)
+        if not stat.S_ISDIR(information.st_mode) or not (source == path or source.is_relative_to("/usr")):
+            raise FixtureUnavailable(f"不支持的系统目录布局：{path}；拒绝绑定其它宿主位置")
+        mounts.append((source, path))
+    cache = Path("/etc/ld.so.cache")
+    try:
+        information = cache.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if not stat.S_ISREG(information.st_mode):
+            raise FixtureUnavailable("系统动态库缓存不是普通文件")
+        mounts.append((cache, cache))
+    return mounts
 
 # 仅在本次挂载根内创建此辅助脚本；relay 不经 shell，不向协议流写日志。
 HELPER = r'''"""容器回环字节桥和转发测试回显对端。"""
@@ -78,13 +117,13 @@ else:
 
 
 class ContainerSSHServer:
-    """只挂本次临时根和只读 /usr；Docker 配置与所有测试数据均为独立文件。"""
+    """只挂本次临时根和只读系统程序/库；不绑定宿主个人目录。"""
 
     host = "127.0.0.1"
     user = "suite"
     container_port = 22222
 
-    def __init__(self, environment, *, image="archlinux:base", docker=None):
+    def __init__(self, environment, *, image=None, docker=None):
         require_linux()
         if os.geteuid() == 0:
             raise FixtureUnavailable("此夹具要求普通用户 UID；不使用容器 root 账户认证")
@@ -92,14 +131,27 @@ class ContainerSSHServer:
         if any(character in str(environment.root) for character in (",", "\n", "\r")):
             raise IsolationError("Docker 绑定路径不能包含逗号或换行")
         self.environment = environment
-        self.docker = docker or shutil.which("docker")
-        self.ssh = shutil.which("ssh")
-        self.scp = shutil.which("scp")
-        self.sftp = shutil.which("sftp")
-        self.ssh_keygen = shutil.which("ssh-keygen")
-        if not all((self.docker, self.ssh, self.scp, self.sftp, self.ssh_keygen)):
-            raise FixtureUnavailable("缺少 Docker 或 OpenSSH 客户端工具")
-        self.image = image
+        self.docker = docker or shutil.which("docker", path=SYSTEM_PATH)
+        self.ssh = shutil.which("ssh", path=SYSTEM_PATH)
+        self.scp = shutil.which("scp", path=SYSTEM_PATH)
+        self.sftp = shutil.which("sftp", path=SYSTEM_PATH)
+        self.ssh_keygen = shutil.which("ssh-keygen", path=SYSTEM_PATH)
+        # 固定系统 PATH，不将个人 venv/自定义 bin 挂入容器；Ubuntu sshd 位于 sbin。
+        self.sshd = shutil.which("sshd", path=SYSTEM_PATH)
+        self.python = shutil.which("python3", path=SYSTEM_PATH)
+        self.shell = shutil.which("bash", path=SYSTEM_PATH)
+        self.nologin = shutil.which("nologin", path=SYSTEM_PATH)
+        if not all((self.docker, self.ssh, self.scp, self.sftp, self.ssh_keygen,
+                    self.sshd, self.python, self.shell, self.nologin)):
+            raise FixtureUnavailable("缺少 Docker、OpenSSH 服务/客户端或系统 Python/bash/nologin")
+        try:
+            self.host_release = platform.freedesktop_os_release()
+        except OSError:
+            self.host_release = {}
+        self.image = image if image is not None else _default_image(self.host_release)
+        if not self.image:
+            raise FixtureUnavailable("显式镜像名称不能为空")
+        self.system_mounts = _system_mounts()
         self.image_id = None
         self.port = None
         self.private_key = environment.root / "ssh" / "container_client_key"
@@ -134,6 +186,7 @@ class ContainerSSHServer:
         for name in list(child):
             if name.startswith("DOCKER_"):
                 child.pop(name)
+        child["PATH"] = SYSTEM_PATH
         return child
 
     def _docker_prefix(self):
@@ -161,9 +214,9 @@ class ContainerSSHServer:
         self.environment.write_private("container/docker/config.json", b"{}\n")
         uid, gid = os.geteuid(), os.getegid()
         files = {
-            "passwd": (f"root:x:0:0:root:/root:/usr/bin/nologin\n"
-                       f"suite:x:{uid}:{gid}:suite:{self.remote_home}:/usr/bin/bash\n"
-                       "sshd:x:74:74:sshd:/var/empty:/usr/bin/nologin\n"),
+            "passwd": (f"root:x:0:0:root:/root:{self.nologin}\n"
+                       f"suite:x:{uid}:{gid}:suite:{self.remote_home}:{self.shell}\n"
+                       f"sshd:x:74:74:sshd:/var/empty:{self.nologin}\n"),
             "group": f"root:x:0:\nsuite:x:{gid}:\nsshd:x:74:\n",
             # 密码认证始终禁用；NP 仅使专用账户不会被 OpenSSH 当成锁定账户。
             "shadow": "root:!:20000:0:99999:7:::\nsuite:NP:20000:0:99999:7:::\nsshd:!:20000:0:99999:7:::\n",
@@ -189,7 +242,8 @@ class ContainerSSHServer:
             "GatewayPorts no", "PermitOpen 127.0.0.1:*", "PermitListen 127.0.0.1:*",
             "PrintMotd no", "PrintLastLog no", "UseDNS no", "LogLevel ERROR", "MaxSessions 4",
             f"Subsystem sftp internal-sftp -d {_quote(self.remote_root)}",
-            f"SetEnv TMPDIR={_quote(self.environment.root / 'temp')}",
+            # sshd 对此选项取首次定义，所有变量必须放在同一条 SetEnv 中。
+            f"SetEnv TMPDIR={_quote(self.environment.root / 'temp')} PATH={_quote(SYSTEM_PATH)}",
         ]
         self.environment.write_private("ssh/container_sshd_config", ("\n".join(configuration) + "\n").encode("utf-8"))
         self.environment.write_private("logs/container-sshd.log", b"")
@@ -208,17 +262,18 @@ class ContainerSSHServer:
             "--cap-drop=ALL", "--security-opt=no-new-privileges",
             "--user", f"{os.geteuid()}:{os.getegid()}", "--log-driver=none",
             "--pids-limit", "64", "--memory", "256m", "--cpus", "1",
-            "--env", "PATH=/usr/bin", "--env", f"TMPDIR={root / 'temp'}",
-            "--mount", "type=bind,src=/usr,dst=/usr,readonly",
+            "--env", "PATH=" + SYSTEM_PATH, "--env", f"TMPDIR={root / 'temp'}",
             "--mount", f"type=bind,src={root},dst={root}",
             "--mount", f"type=bind,src={root / 'temp'},dst=/tmp",
             "--mount", f"type=bind,src={root / 'temp'},dst=/var/tmp",
             "--mount", f"type=bind,src={root / 'runtime'},dst=/run",
         ]
+        for source, destination in self.system_mounts:
+            arguments.extend(["--mount", f"type=bind,src={source},dst={destination},readonly"])
         for name in ("passwd", "group", "shadow", "nsswitch.conf"):
             arguments.extend(["--mount", f"type=bind,src={root / 'container/etc' / name},dst=/etc/{name},readonly"])
         arguments.extend([
-            "--entrypoint", "/usr/bin/sshd", self.image_id, "-D", "-e", "-f",
+            "--entrypoint", self.sshd, self.image_id, "-D", "-e", "-f",
             str(root / "ssh/container_sshd_config"), "-E", str(root / "logs/container-sshd.log"),
         ])
         self._create_attempted = True
@@ -262,7 +317,7 @@ class ContainerSSHServer:
                     if active >= 16:
                         continue
                     process = subprocess.Popen(
-                        [*self._docker_prefix(), "exec", "-i", self.container_id, "/usr/bin/python3", "-B",
+                        [*self._docker_prefix(), "exec", "-i", self.container_id, self.python, "-B",
                          str(self.environment.root / "container/relay.py"), "relay", "--port", str(self.container_port)],
                         cwd=self.environment.root, env=self._docker_environment(), stdin=connection,
                         stdout=connection, stderr=self._proxy_log, start_new_session=True, umask=0o077,
@@ -324,7 +379,7 @@ class ContainerSSHServer:
         if self._echo_port is not None:
             return self._echo_port
         ready = self.environment.root / "runtime/container-echo-ready"
-        self._docker("exec", "--detach", self.container_id, "/usr/bin/python3", "-B",
+        self._docker("exec", "--detach", self.container_id, self.python, "-B",
                      self.environment.root / "container/relay.py", "echo", "--ready", ready)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -347,7 +402,11 @@ class ContainerSSHServer:
                 "privileged": configuration["Privileged"], "user": value["Config"]["User"],
                 "log_driver": configuration["LogConfig"]["Type"],
                 "security_options": configuration["SecurityOpt"], "mounts": value["Mounts"],
-                "image_id": self.image_id}
+                "image_id": self.image_id, "image": self.image, "sshd": self.sshd,
+                "system_mounts": [{"source": str(source), "destination": str(destination)}
+                                  for source, destination in self.system_mounts],
+                "host_system": {key: self.host_release[key] for key in ("ID", "VERSION_ID")
+                                if key in self.host_release}}
 
     def _recover_created_container(self):
         if self.container_id is None and self._create_attempted:
@@ -397,7 +456,7 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", default="archlinux:base", help="本机已有镜像；从不拉取")
+    parser.add_argument("--image", help="显式指定本机已有镜像；默认匹配 Arch/Ubuntu 22.04/24.04，从不拉取")
     args = parser.parse_args()
     try:
         with IsolationEnvironment(DEFAULT_CONTAINER_PARENT) as environment:

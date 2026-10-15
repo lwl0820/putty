@@ -185,6 +185,8 @@ struct pageant_listen_state *pageant_listener_new(
     Plug **plug, PageantListenerClient *plc);
 void pageant_listener_got_socket(struct pageant_listen_state *pl, Socket *);
 void pageant_listener_free(struct pageant_listen_state *pl);
+/* 由监听器所有者在释放前调用；关闭已有连接并取消其在途请求。 */
+void pageant_listener_shutdown_connections(struct pageant_listen_state *pl);
 
 /*
  * Functions to perform specific key actions, either as a client of an

@@ -1,0 +1,85 @@
+diff --git a/vendor/putty/ssh/userauth2-client.c b/vendor/putty/ssh/userauth2-client.c
+--- a/vendor/putty/ssh/userauth2-client.c
++++ b/vendor/putty/ssh/userauth2-client.c
+@@ -1000,6 +1000,10 @@
+ 
+                 ppl_logevent("Trying gssapi-keyex...");
+                 s->pktout = ssh2_userauth_gss_packet(s, "gssapi-keyex");
++                if (!s->pktout) {
++                    ssh_sw_abort(s->ppl.ssh, "GSSAPI MIC generation failed");
++                    return;
++                }
+                 pq_push(s->ppl.out_pq, s->pktout);
+                 s->shgss->lib->release_cred(s->shgss->lib, &s->shgss->ctx);
+                 s->shgss->ctx = NULL;
+@@ -1512,6 +1516,10 @@
+                 /* Now send the MIC */
+ 
+                 s->pktout = ssh2_userauth_gss_packet(s, "gssapi-with-mic");
++                if (!s->pktout) {
++                    ssh_sw_abort(s->ppl.ssh, "GSSAPI MIC generation failed");
++                    return;
++                }
+                 pq_push(s->ppl.out_pq, s->pktout);
+ 
+                 s->shgss->lib->release_cred(s->shgss->lib, &s->shgss->ctx);
+@@ -2546,7 +2554,7 @@
+     strbuf *sb;
+     PktOut *p;
+     Ssh_gss_buf buf;
+-    Ssh_gss_buf mic;
++    Ssh_gss_buf mic = {0};
+ 
+     /*
+      * The mic is computed over the session id + intended
+@@ -2562,8 +2570,15 @@
+     /* Compute the mic */
+     buf.value = sb->s;
+     buf.length = sb->len;
+-    s->shgss->lib->get_mic(s->shgss->lib, s->shgss->ctx, &buf, &mic);
++    Ssh_gss_stat status = s->shgss->lib->get_mic(
++        s->shgss->lib, s->shgss->ctx, &buf, &mic);
+     strbuf_free(sb);
++    /* 库调用失败可能不写输出；不能发送空包或读取未初始化缓冲。 */
++    if (status != SSH_GSS_OK || !mic.value || !mic.length) {
++        if (mic.value)
++            s->shgss->lib->free_mic(s->shgss->lib, &mic);
++        return NULL;
++    }
+ 
+     /* Now we can build the real packet */
+     if (strcmp(authtype, "gssapi-with-mic") == 0) {
+diff --git a/vendor/putty/windows/gss.c b/vendor/putty/windows/gss.c
+--- a/vendor/putty/windows/gss.c
++++ b/vendor/putty/windows/gss.c
+@@ -593,6 +593,7 @@
+     SecBufferDesc InputBufferDescriptor;
+     SecBuffer InputSecurityToken[2];
+ 
++    SSH_GSS_CLEAR_BUF(hash);
+     if (winctx == NULL) return SSH_GSS_FAILURE;
+ 
+     winctx->maj_stat = 0;
+@@ -603,9 +604,10 @@
+                                                  SECPKG_ATTR_SIZES,
+                                                  &ContextSizes);
+ 
+-    if (winctx->maj_stat != SEC_E_OK ||
+-        ContextSizes.cbMaxSignature == 0)
++    if (winctx->maj_stat != SEC_E_OK)
+         return winctx->maj_stat;
++    if (ContextSizes.cbMaxSignature == 0)
++        return SSH_GSS_FAILURE;
+ 
+     InputBufferDescriptor.cBuffers = 2;
+     InputBufferDescriptor.pBuffers = InputSecurityToken;
+@@ -625,6 +627,9 @@
+     if (winctx->maj_stat == SEC_E_OK) {
+         hash->length = InputSecurityToken[1].cbBuffer;
+         hash->value = InputSecurityToken[1].pvBuffer;
++    } else {
++        /* 失败时没有把所有权交给调用者，仍须归还临时签名缓冲。 */
++        sfree(InputSecurityToken[1].pvBuffer);
+     }
+ 
+     return winctx->maj_stat;

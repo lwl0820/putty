@@ -186,15 +186,15 @@ void MainWindow::buildUi() {
     auto *publicLayout = new QVBoxLayout(publicPanel_);
     publicLayout->setContentsMargins(0, 0, 0, 0);
     publicLabel_ = new QLabel(publicPanel_);
+    publicLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     publicKey_ = new QPlainTextEdit(publicPanel_);
     publicKey_->setObjectName(QStringLiteral("publicKey"));
     publicKey_->setReadOnly(true);
     publicKey_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    publicKey_->setMaximumHeight(120);
     publicLabel_->setBuddy(publicKey_);
     publicLayout->addWidget(publicLabel_);
-    publicLayout->addWidget(publicKey_);
-    loadedLayout->addWidget(publicPanel_);
+    publicLayout->addWidget(publicKey_, 1);
+    loadedLayout->addWidget(publicPanel_, 1);
     certificatePanel_ = new QWidget;
     auto *certificateLayout = new QVBoxLayout(certificatePanel_);
     certificateLayout->setContentsMargins(0, 0, 0, 0);

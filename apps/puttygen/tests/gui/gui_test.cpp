@@ -138,6 +138,52 @@ private slots:
         QVERIFY(generate->text().contains(QStringLiteral("Generate")));
         saveScreenshot(window, QStringLiteral("main-en-initial"));
     }
+    void publicKeyResizesWithWindow_data() {
+        QTest::addColumn<QString>("languageCode");
+        QTest::newRow("chinese") << QStringLiteral("zh_CN");
+        QTest::newRow("english") << QStringLiteral("en");
+    }
+    void publicKeyResizesWithWindow() {
+        QFETCH(QString, languageCode);
+        LanguageManager language;
+        language.setLanguage(languageCode);
+        MainWindow window(&language);
+        window.show();
+        QTRY_VERIFY(!window.controller()->busy());
+        generateTestKey(window.controller());
+        QTRY_VERIFY_WITH_TIMEOUT(!window.controller()->busy(), 10000);
+        auto *publicKey = window.findChild<QPlainTextEdit *>(QStringLiteral("publicKey"));
+        QVERIFY(publicKey && publicKey->isVisible());
+        QApplication::processEvents();
+        QLabel *publicLabel = nullptr;
+        for (auto *label : window.findChildren<QLabel *>())
+            if (label->buddy() == publicKey) publicLabel = label;
+        QVERIFY(publicLabel);
+        const QString publicText = publicKey->toPlainText();
+        QVERIFY(!publicText.isEmpty());
+        const QSize originalSize = window.size();
+        const int originalEditorHeight = publicKey->height();
+        const int originalLabelHeight = publicLabel->height();
+        const QStringList fields = {QStringLiteral("fingerprint"), QStringLiteral("comment"),
+                                    QStringLiteral("passphrase"), QStringLiteral("confirmPassphrase")};
+        QList<int> originalFieldHeights;
+        for (const QString &name : fields) {
+            auto *field = window.findChild<QLineEdit *>(name);
+            QVERIFY(field);
+            originalFieldHeights.append(field->height());
+        }
+        saveScreenshot(window, QStringLiteral("resize-%1-initial").arg(languageCode));
+        for (int extraHeight : {240, 480, 0}) {
+            window.resize(originalSize.width(), originalSize.height() + extraHeight);
+            QTRY_COMPARE(window.height(), originalSize.height() + extraHeight);
+            QTRY_COMPARE(publicKey->height(), originalEditorHeight + extraHeight);
+            QCOMPARE(publicLabel->height(), originalLabelHeight);
+            for (qsizetype i = 0; i < fields.size(); ++i)
+                QCOMPARE(window.findChild<QLineEdit *>(fields[i])->height(), originalFieldHeights[i]);
+            QCOMPARE(publicKey->toPlainText(), publicText);
+            saveScreenshot(window, QStringLiteral("resize-%1-plus%2").arg(languageCode).arg(extraHeight));
+        }
+    }
     void translatedStandardButtonsAndSaveGuards() {
         LanguageManager language;
         QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Close | QDialogButtonBox::Yes | QDialogButtonBox::No);

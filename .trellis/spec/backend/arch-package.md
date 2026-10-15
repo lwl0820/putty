@@ -2,13 +2,13 @@
 
 ## 1. 范围与触发
 
-适用于 `apps/puttygen/packaging/arch/`、组件 `Packaging.cmake` 的 Arch 安装分支和 Actions 的独立 Arch x86_64 任务。用户追加 Arch 发布要求，系统 Qt 包与既有 Windows／Ubuntu 私有 Qt 发布分开验证。
+适用于 `packaging/arch/`、组件 `Packaging.cmake` 的 Arch 安装分支和 Actions 的独立 Arch x86_64 任务。用户追加 Arch 发布要求，系统 Qt 包与既有 Windows／Ubuntu 私有 Qt 发布分开验证。
 
 ## 2. 命令与开关
 
 ```bash
-python apps/puttygen/packaging/arch/build_arch.py
-bash apps/puttygen/packaging/arch/smoke_arch.sh
+python packaging/arch/build_arch.py
+bash packaging/arch/smoke_arch.sh
 ```
 
 `PUTTYGEN_ARCH_PACKAGING=ON` 是原生系统安装模式：仅支持 Arch Linux x86_64、Release 和 `/usr` 前缀；与 `PUTTYGEN_RELEASE_PACKAGING` 互斥。其安装结果由 `makepkg` 打包，不生成 CPack 开发归档或执行私有 Qt 部署。

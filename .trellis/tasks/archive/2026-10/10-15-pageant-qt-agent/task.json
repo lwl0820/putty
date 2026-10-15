@@ -1,0 +1,34 @@
+{
+  "id": "pageant-qt-agent",
+  "name": "pageant-qt-agent",
+  "title": "Pageant Qt 密钥代理",
+  "description": "实现 Pageant Qt 密钥管理与双平台原生代理兼容、生命周期和套件认证互操作。",
+  "status": "cancelled",
+  "dev_type": null,
+  "scope": "pageant",
+  "package": null,
+  "priority": "P2",
+  "creator": "lwl0820",
+  "assignee": "lwl0820",
+  "createdAt": "2026-10-15",
+  "completedAt": null,
+  "branch": "codex/putty-suite-completion",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "10-15-putty-suite-completion",
+  "relatedFiles": [
+    ".trellis/tasks/10-15-pageant-qt-agent/prd.md",
+    ".trellis/tasks/10-15-pageant-qt-agent/design.md",
+    ".trellis/tasks/10-15-pageant-qt-agent/implement.md",
+    ".trellis/tasks/10-15-pageant-qt-agent/implement.jsonl",
+    ".trellis/tasks/10-15-pageant-qt-agent/check.jsonl"
+  ],
+  "notes": "用户在最终方案摘要后已明确批准实施。按父任务依赖和本目录检查点推进，保留未执行平台证据边界。\n2026-10-15：用户改为仅保留 PuTTYgen，本套件任务取消，由 10-15-puttygen-only 取代；不代表原验收已完成。",
+  "meta": {
+    "superseded_by": "10-15-puttygen-only"
+  }
+}

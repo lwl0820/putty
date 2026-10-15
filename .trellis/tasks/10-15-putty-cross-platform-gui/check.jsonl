@@ -5,8 +5,8 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "优先复用原版实现，按钮与菜单共用业务处理"}
 {"file": ".trellis/spec/backend/error-handling.md", "reason": "实施中建立的核心句柄、错误与线程契约"}
 {"file": ".trellis/spec/frontend/state-management.md", "reason": "实施中建立的Qt状态、语言与后台生命周期契约"}
-{"file": ".trellis/spec/backend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
-{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "遵守 PuTTYgen 单产品根目录边界，迁移后重新验证路径"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "遵守 PuTTYgen 单产品根目录边界，迁移后重新验证路径"}
 {"file": ".trellis/spec/backend/build-tools.md", "reason": "核验构建脚本错误传播、可选依赖与容器运行目录和上传报告的权限边界"}
 {"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md", "reason": "核对 runner 损坏 Clang 配置的复现、修复及验证范围"}
 {"file": ".trellis/spec/backend/private-file-permissions.md", "reason": "核验产品私钥 ACL 修复及未经测试脚本补权限的原生 OpenSSH 互操作"}

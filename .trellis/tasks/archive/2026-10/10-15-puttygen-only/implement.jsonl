@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "保留 PuTTYgen 行为与平台发布契约；目录以本任务设计为准"}
+{"file": ".trellis/spec/backend/private-file-permissions.md", "reason": "保留 PuTTYgen 行为与平台发布契约；目录以本任务设计为准"}
+{"file": ".trellis/spec/backend/build-tools.md", "reason": "保留 PuTTYgen 行为与平台发布契约；目录以本任务设计为准"}
+{"file": ".trellis/spec/backend/arch-package.md", "reason": "保留 PuTTYgen 行为与平台发布契约；目录以本任务设计为准"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "保留 PuTTYgen 行为与平台发布契约；目录以本任务设计为准"}

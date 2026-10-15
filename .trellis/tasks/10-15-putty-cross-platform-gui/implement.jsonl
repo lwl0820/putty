@@ -5,8 +5,8 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "优先复用原版实现，按钮与菜单共用业务处理"}
 {"file": ".trellis/spec/backend/error-handling.md", "reason": "实施中建立的核心句柄、错误与线程契约"}
 {"file": ".trellis/spec/frontend/state-management.md", "reason": "实施中建立的Qt状态、语言与后台生命周期契约"}
-{"file": ".trellis/spec/backend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
-{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "遵守 PuTTY 套件与 PuTTYgen 组件目录边界，迁移后重新验证路径"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "遵守 PuTTYgen 单产品根目录边界，迁移后重新验证路径"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "遵守 PuTTYgen 单产品根目录边界，迁移后重新验证路径"}
 {"file": ".trellis/spec/backend/build-tools.md", "reason": "遵守标准流编码、Qt Tools 可选依赖及跨身份冒烟报告收集契约"}
 {"file": ".trellis/tasks/10-15-putty-cross-platform-gui/research/ubuntu-ci-libclang.md", "reason": "实际 Ubuntu Actions 失败链与固定 Qt 6.8.3 源码依据"}
 {"file": ".trellis/spec/backend/private-file-permissions.md", "reason": "Windows 私钥新建与覆盖的所有者、受保护 DACL、失败保留内容契约"}

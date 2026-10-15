@@ -2,7 +2,7 @@
 
 ## 1. 范围与触发
 
-适用于 `apps/puttygen/src/core/pg_platform.c` 的 `f_open` 私有写入分支，以及调用该分支的 PPK 和外部私钥格式保存。Windows OpenSSH 会拒绝其他普通用户可访问的私钥；只修测试目录权限无法覆盖产品实际导出行为。
+适用于 `src/core/pg_platform.c` 的 `f_open` 私有写入分支，以及调用该分支的 PPK 和外部私钥格式保存。Windows OpenSSH 会拒绝其他普通用户可访问的私钥；只修测试目录权限无法覆盖产品实际导出行为。
 
 ## 2. 接口
 

@@ -2,7 +2,7 @@
 
 ## 1. 范围与触发
 
-适用于 `apps/puttygen/src/core/` 和调用该模块的 Qt 工作对象。第三方密码实现位于 `vendor/putty/`，自有接口位于 `apps/puttygen/src/core/pg_core.h`；不要把上游 C 结构暴露给 C++。新增接口、改变错误或密钥替换行为时同步本规范与测试。
+适用于 `src/core/` 和调用该模块的 Qt 工作对象。第三方密码实现位于 `vendor/putty/`，自有接口位于 `src/core/pg_core.h`；不要把上游 C 结构暴露给 C++。新增接口、改变错误或密钥替换行为时同步本规范与测试。
 
 ## 2. 接口签名
 

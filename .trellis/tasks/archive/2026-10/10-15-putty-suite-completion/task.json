@@ -1,0 +1,48 @@
+{
+  "id": "putty-suite-completion",
+  "name": "putty-suite-completion",
+  "title": "完善 PuTTY 主程序与其它套件组件",
+  "description": "在现有 PuTTYgen 工程基础上完成 PuTTY 主程序及其它套件组件，先明确跨平台交付范围、界面方案及组件验收边界。",
+  "status": "cancelled",
+  "dev_type": null,
+  "scope": "suite",
+  "package": null,
+  "priority": "P2",
+  "creator": "lwl0820",
+  "assignee": "lwl0820",
+  "createdAt": "2026-10-15",
+  "completedAt": null,
+  "branch": "codex/putty-suite-completion",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-15-putty-suite-foundation",
+    "10-15-putty-suite-cli",
+    "10-15-putty-qt-terminal",
+    "10-15-pageant-qt-agent",
+    "10-15-putty-suite-release"
+  ],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/tasks/10-15-putty-suite-completion/check.jsonl",
+    ".trellis/tasks/10-15-putty-suite-completion/design.md",
+    ".trellis/tasks/10-15-putty-suite-completion/implement.jsonl",
+    ".trellis/tasks/10-15-putty-suite-completion/implement.md",
+    ".trellis/tasks/10-15-putty-suite-completion/prd.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/build-cli.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/components.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/pageant-architecture.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/pageant-parity.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/planning-review.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/planning-validation.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/terminal-architecture.md",
+    ".trellis/tasks/10-15-putty-suite-completion/research/terminal-parity.md"
+  ],
+  "notes": "用户在最终方案摘要后已明确批准实施。按父任务依赖和本目录检查点推进，保留未执行平台证据边界。\n2026-10-15：用户改为仅保留 PuTTYgen，本套件任务取消，由 10-15-puttygen-only 取代；不代表原验收已完成。",
+  "meta": {
+    "superseded_by": "10-15-puttygen-only"
+  }
+}

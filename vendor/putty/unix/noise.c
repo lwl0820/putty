@@ -42,9 +42,8 @@ static bool read_dev_urandom(char *buf, int len)
 
 /*
  * This function is called once, at PuTTY startup. It will do some
- * slightly silly things such as fetching an entire process listing
- * and scanning /tmp, load the saved random seed from disk, and
- * also read 32 bytes out of /dev/urandom.
+ * 启动时读取系统强随机、进程列表及保存的种子，并收集进程元数据。
+ * 进程元数据只提供补充熵，不替代 /dev/urandom 的系统强随机。
  */
 
 void noise_get_heavy(void (*func) (void *, int))
@@ -70,16 +69,18 @@ void noise_get_heavy(void (*func) (void *, int))
         exit(1);
     }
 
-    fp = popen("ls -al /tmp 2>/dev/null", "r");
-    if (fp) {
-        while ( (ret = fread(buf, 1, sizeof(buf), fp)) > 0)
-            func(buf, ret);
-        pclose(fp);
-    } else if (!got_dev_urandom) {
-        fprintf(stderr, "popen: %s\n"
-                "Unable to access fallback entropy source\n", strerror(errno));
-        exit(1);
-    }
+    /* 只读取本进程和时钟元数据，避免扫描系统临时目录。 */
+    pid_t pid = getpid(), parent_pid = getppid();
+    struct timeval tv;
+    struct rusage usage;
+    func(&pid, sizeof(pid));
+    func(&parent_pid, sizeof(parent_pid));
+    memset(&tv, 0, sizeof(tv));
+    if (gettimeofday(&tv, NULL) == 0)
+        func(&tv, sizeof(tv));
+    memset(&usage, 0, sizeof(usage));
+    if (getrusage(RUSAGE_SELF, &usage) == 0)
+        func(&usage, sizeof(usage));
 
     read_random_seed(func);
 }

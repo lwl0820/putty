@@ -1,4 +1,4 @@
-"""Windows 测试数据的两 SID 私有 ACL；不映射注册表，不修改个人目录。"""
+"""Windows 测试数据的私有 ACL；兼容正式私钥的单用户权限。"""
 import ctypes as C
 from ctypes import wintypes as W
 from pathlib import Path
@@ -14,7 +14,7 @@ class _Attributes(C.Structure):
 
 
 class PrivateData:
-    """固定目录句柄，拒绝 reparse／硬链接，验证实际 owner、保护位与两条 ACE。"""
+    """固定目录句柄并核验权限；默认两 SID，正式私钥显式要求单用户 ACE。"""
 
     def __init__(self):
         if sys.platform != "win32":
@@ -112,7 +112,9 @@ class PrivateData:
             self.kernel.CloseHandle(handle)
             raise
 
-    def _check(self, handle, directory):
+    def _check(self, handle, directory, *, owner_only=False):
+        if owner_only and directory:
+            raise ValidationError("单用户权限核验只适用于正式导出的私钥文件")
         owner, acl, descriptor = C.c_void_p(), C.c_void_p(), C.c_void_p()
         if self.security.GetSecurityInfo(handle, 1, 5, C.byref(owner), None,
                                          C.byref(acl), None, C.byref(descriptor)):
@@ -122,10 +124,11 @@ class PrivateData:
             self._ok(self.security.GetSecurityDescriptorControl(descriptor, C.byref(control), C.byref(revision)))
             if not owner or not self.security.EqualSid(owner, self.user) or not acl or not control.value & 0x1000:
                 raise ValidationError("私有数据 owner 或受保护 DACL 不符")
-            if C.c_ushort.from_address(acl.value + 4).value != 2:
-                raise ValidationError("私有数据必须恰有两个 SID 许可")
+            expected = {"user"} if owner_only else {"user", "system"}
+            if C.c_ushort.from_address(acl.value + 4).value != len(expected):
+                raise ValidationError("私有数据 SID 许可数量不符")
             found = set()
-            for index in range(2):
+            for index in range(len(expected)):
                 ace = C.c_void_p()
                 self._ok(self.security.GetAce(acl, index, C.byref(ace)))
                 header = (C.c_ubyte * 4).from_address(ace.value)
@@ -135,7 +138,7 @@ class PrivateData:
                 identity = "user" if self.security.EqualSid(sid, self.user) else (
                     "system" if self.security.EqualSid(sid, self.system) else "other")
                 found.add(identity)
-            if found != {"user", "system"}:
+            if found != expected:
                 raise ValidationError("私有数据允许了额外身份或重复许可")
         finally:
             self.kernel.LocalFree(descriptor)
@@ -177,7 +180,10 @@ class PrivateData:
             self.kernel.CloseHandle(handle)
         return path
 
-    def check_file(self, path, *, harden=False):
+    def check_file(self, path, *, harden=False, owner_only=False):
+        # 正式私钥必须直接核验产品导出权限，不能先改 ACL 掩盖缺陷。
+        if harden and owner_only:
+            raise ValidationError("正式私钥权限核验不能收紧或改写 ACL")
         handle = self._open(path, False, 0xE0080 if harden else 0x20080)
         try:
             if harden:
@@ -186,7 +192,7 @@ class PrivateData:
                     C.byref(acl), C.byref(defaulted)))
                 if self.security.SetSecurityInfo(handle, 1, 0x80000005, self.user, None, acl, None):
                     raise ValidationError("无法收紧受保护数据文件权限")
-            self._check(handle, False)
+            self._check(handle, False, owner_only=owner_only)
         finally:
             self.kernel.CloseHandle(handle)
 

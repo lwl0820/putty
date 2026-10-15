@@ -269,7 +269,7 @@ def run(binary, keygen, parent):
         generated = _run_child([str(keygen), str(key), str(passphrase)], cwd=data,
                                environment=environment, timeout=30, keygen=True)
         keygen_report, public_blob = decode_keygen(generated.stdout)
-        private.check_file(key)
+        private.check_file(key, owner_only=True)
         ppk = ppk_parameters(key, public_blob)
         with RestrictedSSHPeer(public_blob) as peer:
             result = _run_child([str(binary), "--port", str(peer.port), "--key", str(key),

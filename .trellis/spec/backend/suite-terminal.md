@@ -18,6 +18,8 @@ void TerminalController::close();
 
 密钥路径经 `pt_filename_from_utf8` 转为正式 Filename：Windows 使用上游已公开声明的 `decode_utf8_to_wide_string` 和 `filename_from_wstr`，并释放临时宽字符缓冲；Unix 保留原路径字节构造。不能把 Qt 的 UTF-8 路径交给 Windows 按 ANSI 代码页解释的 `filename_from_str`。上游实现文件内的 `filename_from_utf8` 没有公共声明，不能直接跨翻译单元调用；自有平台适配 C 源在 MSVC 下将 C4013 作为编译错误，避免隐式 `int` 截断 x64 指针。原生平台用例核对中文及空格路径的宽字符结果，真实认证另用同类路径读出实际 PPK。
 
+Windows 独立密钥工具沿用 PuTTYgen 正式导出契约：PPK 的受保护 DACL 恰有当前用户一条完整访问许可。运行器必须用 `PrivateData.check_file(..., owner_only=True)` 直接核验，不能先改写 ACL，也不能误要求 SYSTEM 许可。其余夹具目录、口令和运行产物继续使用当前用户与 SYSTEM 两条许可；两种模式均严格拒绝额外身份、继承标记、错误 owner、错误权限、reparse 和多硬链接。单用户模式不能与 `harden=True` 组合。
+
 Windows 同一 C 翻译单元同时使用 PuTTY 平台接口和 hive／Win32 头时，必须先包含 `putty.h`，由正式 `windows/platform.h` 建立 `winsock2.h`／`ws2tcpip.h` 后再包含 `windows.h`。不能先经 `private_hive.h` 间接引入旧 Winsock 头，再加载 PuTTY 头；也不能用忽略 SDK 重定义错误代替正确包含顺序。新增原生宿主须由 MSVC 实际编译确认，Linux 合同测试不能证明此项。
 
 受控上游 Windows 存储保持 ANSI Win32 接口，其 `storage_variant.c`／`seed_guard.c` 须在仅依赖 `suite-config`、hive 的独立非 Qt 对象目标中编译，再将对象直接注入终端宿主。保留存储变体对 `UNICODE` 的编译拒绝；不在 Qt 主目标全局取消 Unicode，也不用源文件全局属性影响其它宿主。实际生成命令须核对两侧宏隔离，MAP 仍须拒绝生产存储对象。

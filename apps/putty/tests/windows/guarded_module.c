@@ -26,7 +26,7 @@ static void guarded_drained(void *context)
 static void guarded_destroy(void *context)
 {
     pt_terminal_real_module.destroy(context);
-    /* 正式 random_unref 在最后一引用时保存种子并释放 PRNG／其计时器。 */
+    /* 正式模块先保存种子，再由最后一次 random_unref 释放 PRNG／其计时器。 */
     if (random_active != 0) ExitProcess(91);
     suite_terminal_core_destroyed(suite_seed_guard_statistics());
     suite_seed_guard_unbind();

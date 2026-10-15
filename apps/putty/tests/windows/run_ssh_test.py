@@ -42,6 +42,14 @@ def safe_diagnostics(output, *, keygen=False):
             continue
         accepted = line if line in fixed else None
         if not keygen:
+            numeric_hive = (
+                r"终端 hive 生命周期计数：创建=[0-9]{1,10}，销毁=[0-9]{1,10}，主机键=[0-9]{1,10}",
+                r"终端 hive 种子计数：读取=[0-9]{1,10}，写入=[0-9]{1,10}，读打开=[0-9]{1,10}，"
+                r"写打开=[0-9]{1,10}，注册表=[0-9]{1,10}，读取字节=[0-9]{1,20}，写入字节=[0-9]{1,20}",
+                r"终端 hive 收尾代码：核验=[0-9]{1,10}，关闭=[0-9]{1,10}，清理=[0-9]{1,10}，清理执行=[01]",
+            )
+            if any(re.fullmatch(pattern, line) for pattern in numeric_hive):
+                accepted = line
             if re.fullmatch(r"终端测试检查失败：行=[1-9][0-9]{0,3}", line) or re.fullmatch(
                     r"终端 hive (?:初始化失败|清理或实际存储检查失败)，代码 [0-9]{1,10}", line):
                 accepted = line
@@ -153,7 +161,7 @@ def ppk_parameters(path, public_blob):
 
 
 def _number(value, minimum, maximum):
-    return type(value) in (int, float) and math.isfinite(value) and minimum <= value <= maximum
+    return type(value) in (int, float) and minimum <= value <= maximum and math.isfinite(value)
 
 
 def validate_terminal(report, keygen):
@@ -196,13 +204,27 @@ def validate_terminal(report, keygen):
 
 def validate_hive(output):
     report = _json(output, "terminal-hive")
-    if (any(report.get(key) is not True for key in ("continuous_mapping", "cleanup", "host_key_in_private_hive")) or
+    counters = ("cores_created", "cores_destroyed", "seed_reads", "seed_writes", "seed_opens_read",
+                "seed_opens_write", "seed_bytes_read", "seed_bytes_written", "registry_accesses")
+    if (any(type(report.get(key)) is not int for key in counters) or
+            any(report.get(key) is not True for key in ("continuous_mapping", "cleanup", "host_key_in_private_hive")) or
             report.get("cores_created") != 5 or report.get("cores_destroyed") != 5 or
             not _number(report.get("seed_reads"), 5, 100) or
             not _number(report.get("seed_writes"), 10, 100) or
+            report.get("seed_opens_read") != 5 or report.get("seed_opens_write") != 10 or
+            not _number(report.get("seed_bytes_read"), 1, 16384) or
+            not _number(report.get("seed_bytes_written"), 1, 16384) or
             not _number(report.get("registry_accesses"), 1, 100000)):
         raise ValidationError("终端核心、HKCU 或随机种子未完整受控清理")
     return report
+
+
+def summarize_hive(report):
+    """保留已核验的真实计数，不复制宿主可能附带的私有内容。"""
+    return {name: report[name] for name in (
+        "schema", "kind", "passed", "continuous_mapping", "cleanup", "cores_created", "cores_destroyed",
+        "seed_reads", "seed_writes", "seed_opens_read", "seed_opens_write", "seed_bytes_read",
+        "seed_bytes_written", "registry_accesses", "host_key_in_private_hive")}
 
 
 def validate_peer(report):
@@ -316,8 +338,7 @@ def run(binary, keygen, parent):
                               "capacity_refusal_observed", "order_verified_by_remote"),
         }.items():
             terminal_summary[group] = {name: terminal[group][name] for name in fields}
-        hive = {name: hive[name] for name in ("schema", "kind", "passed", "continuous_mapping", "cleanup",
-            "cores_created", "cores_destroyed", "seed_reads", "seed_writes", "registry_accesses", "host_key_in_private_hive")}
+        hive = summarize_hive(hive)
         peer_summary = {name: peer_report[name] for name in ("paramiko", "bind_host", "closed", "live_threads",
             "active_connections", "connection_errors", "accepted_connections", "authenticated_connections",
             "completed_commands", "capacity_refusals")}

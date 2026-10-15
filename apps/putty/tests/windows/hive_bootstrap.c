@@ -65,30 +65,46 @@ DWORD suite_terminal_finish(int passed)
         if (error) return error;
     }
     DWORD error = ERROR_SUCCESS;
+    DWORD count = 0;
     if (passed) {
         HKEY key = NULL;
-        DWORD count = 0;
         error = RegOpenKeyExW(suite_hive_key(hive), L"Software\\SimonTatham\\PuTTY\\SshHostKeys", 0, KEY_READ, &key);
         if (!error) error = RegQueryInfoKeyW(key, NULL, NULL, NULL, NULL, NULL, NULL,
                                            &count, NULL, NULL, NULL, NULL);
         if (key) { DWORD closed = RegCloseKey(key); if (!error) error = closed; }
         if (!error && (!count || created != 5 || destroyed != 5 ||
             !totals.reads || !totals.writes || totals.opens_read != 5 ||
-            totals.opens_write != 10 || !totals.registry_accesses || !totals.bytes_written))
+            totals.opens_write != 10 || !totals.registry_accesses ||
+            !totals.bytes_read || !totals.bytes_written))
             error = ERROR_INVALID_DATA;
     }
+    DWORD verified = error;
     DWORD closed = suite_hive_close(hive);
     if (!closed) hive = NULL;
     if (!error) error = closed;
+    DWORD removed = ERROR_SUCCESS;
     if (!closed) {
-        DWORD removed = suite_hive_cleanup(temporary, root);
+        removed = suite_hive_cleanup(temporary, root);
         if (!error) error = removed;
+    }
+    if (error) {
+        /* 固定字段只包含计数及系统错误码，不能转录注册表、种子或路径。 */
+        fprintf(stderr, "终端 hive 生命周期计数：创建=%u，销毁=%u，主机键=%lu\n",
+                created, destroyed, (unsigned long)count);
+        fprintf(stderr, "终端 hive 种子计数：读取=%u，写入=%u，读打开=%u，写打开=%u，注册表=%u，读取字节=%llu，写入字节=%llu\n",
+                totals.reads, totals.writes, totals.opens_read, totals.opens_write,
+                totals.registry_accesses, totals.bytes_read, totals.bytes_written);
+        fprintf(stderr, "终端 hive 收尾代码：核验=%lu，关闭=%lu，清理=%lu，清理执行=%u\n",
+                (unsigned long)verified, (unsigned long)closed, (unsigned long)removed, (unsigned)!closed);
     }
     if (!error && passed)
         printf("{\"schema\":1,\"kind\":\"terminal-hive\",\"passed\":true,"
                "\"continuous_mapping\":true,\"cleanup\":true,\"cores_created\":%u,"
                "\"cores_destroyed\":%u,\"seed_reads\":%u,\"seed_writes\":%u,"
+               "\"seed_opens_read\":%u,\"seed_opens_write\":%u,"
+               "\"seed_bytes_read\":%llu,\"seed_bytes_written\":%llu,"
                "\"registry_accesses\":%u,\"host_key_in_private_hive\":true}\n",
-               created, destroyed, totals.reads, totals.writes, totals.registry_accesses);
+               created, destroyed, totals.reads, totals.writes, totals.opens_read,
+               totals.opens_write, totals.bytes_read, totals.bytes_written, totals.registry_accesses);
     return error;
 }

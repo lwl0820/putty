@@ -523,6 +523,8 @@ static void destroy(void *context)
     for (int i = PT_FRAME + 1; i <= PT_LOG_APPEND; ++i)
         if (s->pending[i].data) strbuf_free(s->pending[i].data);
     conf_free(s->conf);
+    /* 原版宿主退出前显式保存；最后一次 unref 将 active 降至零，不会代为写出。 */
+    random_save_seed();
     random_unref();
     active_session = NULL;
     sfree(s);

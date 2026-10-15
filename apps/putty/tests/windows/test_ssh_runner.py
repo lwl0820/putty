@@ -50,6 +50,14 @@ class SSHRunnerTest(unittest.TestCase):
         self.assertEqual(runner.safe_diagnostics(b"x" * 16384 + stages.encode()), [])
         self.assertEqual(runner.safe_diagnostics((unsafe + "测试密钥生成或参数校准失败\n").encode(), keygen=True),
                          ["测试密钥生成或参数校准失败"])
+        counts = ["终端 hive 生命周期计数：创建=5，销毁=5，主机键=1",
+                  "终端 hive 种子计数：读取=10，写入=5，读打开=5，写打开=5，注册表=20，读取字节=1024，写入字节=160",
+                  "终端 hive 收尾代码：核验=13，关闭=0，清理=0，清理执行=1"]
+        self.assertEqual(runner.safe_diagnostics(("\n".join(counts) + "\n").encode()), counts)
+        for line in counts:
+            for suffix in ("，路径=/私有/hive", "，口令=保密"):
+                self.assertEqual(runner.safe_diagnostics((line + suffix).encode()), [])
+        self.assertEqual(runner.safe_diagnostics("\n".join(counts).encode(), keygen=True), [])
         for failure in (subprocess.CompletedProcess(["禁止导出命令"], 7, b"", (stages + unsafe).encode()),
                         subprocess.TimeoutExpired(["禁止导出命令"], 70, stderr=(stages + unsafe).encode())):
             with self.subTest(failure=type(failure)), patch.object(runner.subprocess, "run") as child:
@@ -158,12 +166,25 @@ class SSHRunnerTest(unittest.TestCase):
     def test_hive_requires_continuous_mapping_private_hostkey_and_all_five_cores(self):
         report = {"schema": 1, "kind": "terminal-hive", "passed": True, "continuous_mapping": True,
                   "cleanup": True, "host_key_in_private_hive": True, "cores_created": 5,
-                  "cores_destroyed": 5, "seed_reads": 10, "seed_writes": 10, "registry_accesses": 100}
+                  "cores_destroyed": 5, "seed_reads": 10, "seed_writes": 10, "registry_accesses": 100,
+                  "seed_opens_read": 5, "seed_opens_write": 10,
+                  "seed_bytes_read": 1024, "seed_bytes_written": 320}
         runner.validate_hive(json.dumps(report).encode())
         for fields in ({"continuous_mapping": False}, {"cores_destroyed": 4}, {"cleanup": False},
-                       {"host_key_in_private_hive": False}, {"seed_writes": 0}):
+                       {"host_key_in_private_hive": False}, {"seed_writes": 0},
+                       {"seed_opens_write": 5}, {"seed_opens_read": 4},
+                       {"seed_bytes_read": 0}, {"seed_bytes_written": 0},
+                       {"seed_opens_write": 10.0}, {"seed_bytes_read": True},
+                       {"seed_bytes_written": 10 ** 1000}):
             with self.subTest(fields=fields), self.assertRaises(runner.ValidationError):
                 runner.validate_hive(json.dumps({**report, **fields}).encode())
+        for missing in ("seed_opens_read", "seed_opens_write", "seed_bytes_read", "seed_bytes_written"):
+            changed = {key: value for key, value in report.items() if key != missing}
+            with self.subTest(missing=missing), self.assertRaises(runner.ValidationError):
+                runner.validate_hive(json.dumps(changed).encode())
+        summary = runner.summarize_hive({**report, "private_path": "/私有/hive", "seed_data": "私有内容"})
+        self.assertEqual(summary, report)
+        self.assertNotIn("私有", json.dumps(summary, ensure_ascii=False))
 
     def test_peer_requires_exact_authentication_commands_and_no_live_resources(self):
         report = {"paramiko": "5.0.0", "bind_host": "127.0.0.1", "closed": True, "live_threads": 0,

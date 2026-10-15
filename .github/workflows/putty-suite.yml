@@ -88,6 +88,45 @@ jobs:
           name: putty-suite-windows-mit-kdc-evidence
           path: .tmp/windows-ci/reports/gss-mit-kdc.json
           if-no-files-found: warn
+  windows-mit-gss-ssh:
+    name: Windows x64 MIT GSS 与 SSH 五场景
+    needs: windows-mit-kdc
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8
+      TMP: ${{ github.workspace }}\.tmp\temp
+      TEMP: ${{ github.workspace }}\.tmp\temp
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备项目临时目录
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force .tmp/temp, .tmp/windows-ci/reports | Out-Null
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 核对认证报告与外层清理边界
+        shell: pwsh
+        run: |
+          python -B -m unittest discover -s tools/suite/windows/tests -p test_gss_ci.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 纯提取并核对固定 MIT 工具
+        shell: pwsh
+        run: |
+          $sevenzip = (Get-Command 7z.exe -ErrorAction Stop).Source
+          python -B tools/suite/windows/gss_mit/prepare_kfw.py --parent .tmp/windows-gss-ci-mit --sevenzip "$sevenzip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 独立准备并验证 GSS、SSH、资源回收与个人目录
+        shell: pwsh
+        run: |
+          python -B tools/suite/windows/gss_ci.py --tools .tmp/windows-gss-ci-tools --python-tools .tmp/windows-gss-ci-python --mit-directory .tmp/windows-gss-ci-mit/portable/bin --parent .tmp/windows-gss-ci-runs --invocation .tmp/windows-gss-ci-invocation --report .tmp/windows-ci/reports/gss-mit-ssh.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: putty-suite-windows-mit-gss-ssh-evidence
+          path: .tmp/windows-ci/reports/gss-mit-ssh.json
+          if-no-files-found: warn
   windows:
     name: Windows Server 2022 MSVC x64
     runs-on: windows-2022

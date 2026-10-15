@@ -7,6 +7,45 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(CTest)
 option(PUTTY_BUILD_PUTTYGEN "构建 PuTTYgen 组件" ON)
+option(PUTTY_BUILD_PUTTY "构建 Qt PuTTY 主程序" OFF)
+option(PUTTY_BUILD_PAGEANT "构建 Qt Pageant 组件" OFF)
+option(PUTTY_BUILD_PLINK "构建 Plink 命令行组件" OFF)
+option(PUTTY_BUILD_PSCP "构建 PSCP 命令行组件" OFF)
+option(PUTTY_BUILD_PSFTP "构建 PSFTP 命令行组件" OFF)
+option(PUTTY_BUILD_RUNTIME "独立构建套件运行时及其测试" OFF)
+
+# 尚未接入的产品不能以空目标代替可运行组件。
+foreach(component PUTTY PAGEANT)
+  if(PUTTY_BUILD_${component})
+    string(TOLOWER "${component}" component_dir)
+    if(NOT EXISTS "${PUTTY_SOURCE_DIR}/apps/${component_dir}/CMakeLists.txt")
+      message(FATAL_ERROR "${component} 组件尚未实现；请关闭 PUTTY_BUILD_${component}")
+    endif()
+  endif()
+endforeach()
+
 if(PUTTY_BUILD_PUTTYGEN)
   add_subdirectory(apps/puttygen)
+endif()
+
+if(PUTTY_BUILD_PUTTY OR PUTTY_BUILD_PAGEANT OR PUTTY_BUILD_RUNTIME)
+  include(cmake/SuitePuTTY.cmake)
+  suite_add_putty_core()
+  add_subdirectory(libs/putty-runtime)
+endif()
+
+foreach(component PUTTY PAGEANT PLINK PSCP PSFTP)
+  if(PUTTY_BUILD_${component})
+    string(TOLOWER "${component}" component_dir)
+    add_subdirectory("apps/${component_dir}")
+  endif()
+endforeach()
+
+if(BUILD_TESTING AND (PUTTY_BUILD_PUTTY OR PUTTY_BUILD_PAGEANT OR PUTTY_BUILD_RUNTIME
+    OR PUTTY_BUILD_PLINK OR PUTTY_BUILD_PSCP OR PUTTY_BUILD_PSFTP))
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME suite-fixture COMMAND "${Python3_EXECUTABLE}" -B -m unittest
+    discover -s tools/suite/tests -v)
+  set_tests_properties(suite-fixture PROPERTIES
+    WORKING_DIRECTORY "${PUTTY_SOURCE_DIR}" LABELS "runtime;suite;isolation" TIMEOUT 60)
 endif()

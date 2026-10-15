@@ -1,15 +1,19 @@
 # 套件与密钥核心目录
 
-本仓库属于 PuTTY 套件；当前可构建的图形组件是 PuTTYgen。组件代码、测试、资源和打包文件放在 `apps/puttygen/`，不得重新占用根目录的 `src/`、`tests/` 或 `packaging/`。
+本仓库属于 PuTTY 套件；当前可构建的图形组件是 PuTTYgen，三个命令行组件通过独立上游构建接入。各组件代码、测试、资源和打包文件放在 `apps/<组件>/`，不得重新占用根目录的 `src/`、`tests/` 或 `packaging/`。
 
 | 路径 | 职责 |
 | --- | --- |
-| `CMakeLists.txt` | 套件入口，通过 `PUTTY_BUILD_PUTTYGEN` 选择组件 |
+| `CMakeLists.txt` | 套件入口，通过 `PUTTY_BUILD_*` 选择组件，默认只启用 PuTTYgen |
+| `apps/plink/`、`apps/pscp/`、`apps/psftp/` | 原命令行目标接入、测试与安装 |
+| `libs/putty-runtime/` | 新图形程序共用的 C 边界、单核心线程与平台事件桥 |
 | `apps/puttygen/src/core/` | 自有 C 密钥适配、平台随机和文件操作 |
 | `apps/puttygen/tests/core/` | 核心矩阵和独立互操作检查 |
 | `vendor/putty/` | 固定版本官方源码，其他组件可复用 |
 | `vendor/patches/` | 对上游的必要补丁及来源记录 |
 | `cmake/UpstreamPuTTY.cmake` | 上游最小密钥库构建 |
+| `cmake/SuitePuTTY.cmake`、`SuitePuTTYSources.cmake`、`SuiteCLI.cmake` | 独立完整核心、显式源清单与 CLI 构建 |
+| `tools/suite/` | 存储、代理环境与本地 SSH/SFTP 的隔离夹具 |
 | `tools/qt/` | 公共 Qt 源码构建脚本与版本锁 |
 | `tools/ubuntu-build-dependencies.sh` | 目标 Ubuntu 构建依赖 |
 | `.tmp/` | 所有构建、下载、夹具、截图及验证报告 |

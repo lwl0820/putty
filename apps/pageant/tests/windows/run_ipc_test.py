@@ -13,12 +13,15 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "tools/suite/windows"))
 from support import (ValidationError, file_digest, native_environment, project_path,
                      write_report)  # noqa: E402
+from private_data import PrivateData  # noqa: E402
 
 CHECKS = {"startup-discovery", "dual-list", "pipe-add-wm-list", "dual-signatures",
           "malformed-copydata", "malformed-mapping", "cross-transport-remove",
           "deferred-cancel", "deferred-decrypt", "pending-close",
           "partial-pipe-close", "endpoint-cleanup",
-          "stalled-pipe-client-close", "stalled-window-client-close", "fragmented-client-query"}
+          "stalled-pipe-client-close", "stalled-window-client-close", "fragmented-client-query",
+          "unix-list", "unix-cross-transport-keys", "unix-signature", "unix-existing-file-preserved",
+          "unix-listener-failure-cleanup", "unix-partial-close", "unix-pending-close", "unix-endpoint-cleanup"}
 
 
 def audit_map(path):
@@ -63,26 +66,58 @@ def run(binary, parent):
     link = audit_map(Path(str(binary) + ".map"))
     parent = project_path(parent)
     parent.mkdir(parents=True, exist_ok=True)
-    root = project_path(parent / ("run-" + uuid.uuid4().hex))
-    root.mkdir()
+    root = project_path(parent / ("run-" + uuid.uuid4().hex[:16]))
+    security = PrivateData()
+    created = False
     try:
-        result = subprocess.run([str(binary), "--scope", uuid.uuid4().hex], cwd=root, env=native_environment(root),
+        security.directory(root)
+        created = True
+        endpoint = root / "agent.sock"
+        # 原版传 ACP 字节，但 Winsock 按 UTF-8 解读；核实夹具确实落在同一路径。
+        try:
+            encoded = str(endpoint).encode("mbcs", errors="strict")
+        except UnicodeError as error:
+            raise ValidationError("AF_UNIX 测试路径不能由当前 Windows ACP 表示") from error
+        try:
+            actual = encoded.decode("utf-8", errors="strict")
+        except UnicodeError as error:
+            raise ValidationError("上游 ACP 字节不能作为真实 Winsock UTF-8 路径") from error
+        if len(encoded) >= 108 or encoded.decode("mbcs") != str(endpoint) or actual != str(endpoint):
+            raise ValidationError("AF_UNIX 测试路径超过原版 ACP/sun_path 边界")
+        preserved = security.write(root / "existing.txt", b"pageant-unix-existing-file-preserved\n")
+        identity = preserved.stat().st_ino
+        digest = file_digest(preserved)
+        result = subprocess.run([str(binary), "--scope", uuid.uuid4().hex,
+                                 "--unix-socket", str(endpoint), "--blocked-path", str(preserved)],
+                                cwd=root, env=native_environment(root),
                                 capture_output=True, timeout=70)
         if result.returncode:
             raise ValidationError(f"Pageant 原生宿主失败，退出码 {result.returncode}：" +
                                   result.stderr.decode("utf-8", errors="replace")[:4096])
         report = decode(result.stdout)
+        security.check_file(preserved)
+        if preserved.stat().st_ino != identity or file_digest(preserved) != digest:
+            raise ValidationError("AF_UNIX 监听拒绝覆盖时改变了既有普通文件")
+        preserved.unlink()
         if any(root.iterdir()):
             raise ValidationError("Pageant 无存储宿主意外创建运行产物")
         report.update({"binary_sha256": file_digest(binary), "link_audit": link,
                        "platform": sys.platform, "namespace": "compile-time-and-per-run-random",
+                       "transports": ["named-pipe", "wm-copydata", "af-unix"],
+                       "unix_path_encoding": "upstream-acp-bytes", "unix_kernel_path_encoding": "utf-8",
+                       "unix_path_limit_bytes": 107,
+                       "unix_parent_acl": "protected-current-user-and-system",
+                       "unix_endpoint_ownership": "pinned-no-delete-share-and-self-connection-peer-pid",
+                       "unix_replacement_preserved": True,
                        "unverified": ["original-name-cross-version-startup", "cross-integrity-owner-acl",
                                       "windows-10-desktop", "windows-11-desktop", "openssh-authentication",
                                       "upstream-storage", "windows-gui"]})
         return report
     finally:
-        project_path(root, must_exist=True)
-        shutil.rmtree(root)
+        security.close()
+        if created and root.exists():
+            project_path(root, must_exist=True)
+            shutil.rmtree(root)
 
 
 def main():

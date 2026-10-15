@@ -10,6 +10,8 @@ extern "C" {
 #define PA_MAGIC UINT32_C(0x50414731)
 #define PA_MAX_PUBLIC_BYTES (2u * 1024u * 1024u)
 typedef struct pa_options {
+    /* Linux 为原路径字节；Windows 可选 AF_UNIX 收上游 ACP 原字节，空串禁用。
+     * Windows 内核按 UTF-8 解读，非法编码会被拒绝，不保证非 ASCII ACP 路径。 */
     char socket_path[108];
 #ifdef _WIN32
     /* 二次启动仅向现有原版/新版代理添加密钥，不建立另一份密钥库。 */

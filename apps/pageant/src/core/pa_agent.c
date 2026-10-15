@@ -7,6 +7,9 @@
 #ifdef _WIN32
 #include "pa_windows.h"
 #include "security-api.h"
+#if HAVE_AFUNIX_H
+#include <afunix.h>
+#endif
 #else
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -41,6 +44,8 @@ struct pa_state {
     pa_windows_ipc *ipc;
     PageantClient legacy;
     bool registered;
+    struct pageant_listen_state *unix_listener;
+    HANDLE unix_endpoint;
 #endif
 };
 static pa_state *active;
@@ -306,6 +311,143 @@ static bool valid_socket_path(const char *path)
     return valid;
 }
 #endif
+#ifdef _WIN32
+#if HAVE_AFUNIX_H && defined(SIO_AF_UNIX_GETPEERPID)
+static bool unix_peer_is_current_process(SOCKET socket)
+{
+    ULONG pid = 0;
+    DWORD returned = 0;
+    /* 部分旧驱动成功写入 PID 却返回零长度；成功状态和实际 PID 必须同时匹配。 */
+    return WSAIoctl(socket, SIO_AF_UNIX_GETPEERPID, NULL, 0, &pid, sizeof(pid),
+                    &returned, NULL, NULL) == 0 && pid == GetCurrentProcessId();
+}
+static bool wait_unix_probe(SOCKET socket, bool readable, ULONGLONG deadline)
+{
+    ULONGLONG now = GetTickCount64();
+    if (now >= deadline) return false;
+    DWORD remaining = (DWORD)(deadline - now);
+    struct timeval timeout = {(long)(remaining / 1000), (long)(remaining % 1000) * 1000};
+    fd_set ready, errors;
+    FD_ZERO(&ready); FD_SET(socket, &ready);
+    FD_ZERO(&errors); FD_SET(socket, &errors);
+    int result = select(0, readable ? &ready : NULL, readable ? NULL : &ready,
+                        &errors, &timeout);
+    return result > 0 && FD_ISSET(socket, &ready) && !FD_ISSET(socket, &errors);
+}
+static bool verify_unix_endpoint(const char *path)
+{
+    SOCKET listener = INVALID_SOCKET, probe = INVALID_SOCKET, accepted = INVALID_SOCKET;
+    bool verified = false;
+    ULONGLONG deadline = GetTickCount64() + 250;
+    /* 只枚举上游拥有的原生套接字，不从私有 Socket 结构推断句柄布局。 */
+    int index;
+    for (SOCKET candidate = first_socket(&index); candidate != INVALID_SOCKET;
+         candidate = next_socket(&index)) {
+        SOCKADDR_UN address = {0};
+        int length = sizeof(address);
+        if (getsockname(candidate, (struct sockaddr *)&address, &length) == 0 &&
+            address.sun_family == AF_UNIX &&
+            memchr(address.sun_path, '\0', sizeof(address.sun_path)) &&
+            !strcmp(address.sun_path, path)) {
+            if (listener != INVALID_SOCKET) return false;
+            listener = candidate;
+        }
+    }
+    if (listener == INVALID_SOCKET) return false;
+    probe = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (probe == INVALID_SOCKET) goto finished;
+    u_long nonblocking = 1;
+    if (!SetHandleInformation((HANDLE)probe, HANDLE_FLAG_INHERIT, 0) ||
+        ioctlsocket(probe, FIONBIO, &nonblocking) != 0) goto finished;
+    SOCKADDR_UN address = {0};
+    address.sun_family = AF_UNIX;
+    memcpy(address.sun_path, path, strlen(path) + 1);
+    if (connect(probe, (struct sockaddr *)&address, sizeof(address)) != 0 &&
+        WSAGetLastError() != WSAEWOULDBLOCK) goto finished;
+    /* Windows 的本地 connect 可能等待 accept。仅接收自己的原生监听，
+     * 不在 create 内运行核心或 GUI 消息循环，整个探针最多等待 250 ms。 */
+    if (!wait_unix_probe(listener, true, deadline)) goto finished;
+    accepted = accept(listener, NULL, NULL);
+    if (accepted == INVALID_SOCKET ||
+        !SetHandleInformation((HANDLE)accepted, HANDLE_FLAG_INHERIT, 0) ||
+        ioctlsocket(accepted, FIONBIO, &nonblocking) != 0 ||
+        !wait_unix_probe(probe, false, deadline)) goto finished;
+    int error = 0, error_size = sizeof(error);
+    if (getsockopt(probe, SOL_SOCKET, SO_ERROR, (char *)&error, &error_size) != 0 || error)
+        goto finished;
+    verified = unix_peer_is_current_process(probe) && unix_peer_is_current_process(accepted) &&
+               GetTickCount64() < deadline;
+  finished:
+    if (accepted != INVALID_SOCKET) {
+        /* accept 可能继承 WSAAsyncSelect；按上游代次屏障丢弃已排队的旧句柄消息。 */
+        do_select(accepted, false);
+        closesocket(accepted);
+        done_with_socket(accepted);
+    }
+    if (probe != INVALID_SOCKET) closesocket(probe);
+    return verified;
+}
+#endif
+static bool start_unix_listener(pa_state *s)
+{
+    const char *path = s->options.socket_path;
+    if (!path[0]) return true;
+#if HAVE_AFUNIX_H && defined(SIO_AF_UNIX_GETPEERPID)
+    /* 沿固定上游传入 ACP 原字节；Winsock 内核却按 UTF-8 解读 sun_path。
+     * 仅把同一组实际字节严格转换给文件 API，不宣称任意 ACP 路径可用。 */
+    if (strlen(path) >= sizeof(((SOCKADDR_UN *)0)->sun_path)) return false;
+    int chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+    if (!chars) return false;
+    wchar_t *wide = snewn(chars, wchar_t);
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, chars) != chars) {
+        sfree(wide); return false;
+    }
+    DWORD attributes = GetFileAttributesW(wide);
+    DWORD error = GetLastError();
+    /* 现存端点也拒绝，不使用原版 remove 去删除用户指定的既有文件。 */
+    if (attributes != INVALID_FILE_ATTRIBUTES ||
+        (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)) {
+        sfree(wide); return false;
+    }
+    Plug *plug;
+    s->unix_listener = pageant_listener_new(&plug, &s->client);
+    Socket *socket = sk_newlistener_unix(path, plug);
+    bool failed = sk_socket_error(socket) != NULL;
+    pageant_listener_got_socket(s->unix_listener, socket);
+    if (failed) { sfree(wide); return false; }
+#ifdef PA_WINDOWS_TEST_NAMESPACE
+    /* 专用宿主在此替换端点，回归 bind 与文件句柄获取之间的竞态。 */
+    extern void pa_test_unix_after_bind(const char *path);
+    pa_test_unix_after_bind(path);
+#endif
+    HANDLE endpoint = CreateFileW(wide, DELETE | FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    sfree(wide);
+    if (endpoint == INVALID_HANDLE_VALUE) return false;
+    FILE_ATTRIBUTE_TAG_INFO tag;
+    BY_HANDLE_FILE_INFORMATION info;
+    if (!GetFileInformationByHandleEx(endpoint, FileAttributeTagInfo, &tag, sizeof(tag)) ||
+        tag.ReparseTag != IO_REPARSE_TAG_AF_UNIX ||
+        !(tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+        (tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+        !GetFileInformationByHandle(endpoint, &info) || info.nNumberOfLinks != 1) {
+        CloseHandle(endpoint);
+        return false;
+    }
+    /* 固定路径对象后，须实际连接回本次监听并核双方 PID；类型检查不能证明归属。 */
+    if (!verify_unix_endpoint(path)) {
+        CloseHandle(endpoint);
+        return false;
+    }
+    /* 只有归属探针成功才取得删除权；收尾不再按路径删除。 */
+    s->unix_endpoint = endpoint;
+    return true;
+#else
+    return false;
+#endif
+}
+#endif
 static void destroy(void *context)
 {
     pa_state *s = context;
@@ -323,6 +465,19 @@ static void destroy(void *context)
         pageant_listener_shutdown_connections(s->listener);
         pageant_listener_free(s->listener);
     }
+#ifdef _WIN32
+    if (s->unix_listener) {
+        pageant_listener_shutdown_connections(s->unix_listener);
+        pageant_listener_free(s->unix_listener);
+    }
+    if (s->unix_endpoint) {
+        FILE_DISPOSITION_INFO disposition;
+        disposition.DeleteFile = TRUE;
+        SetFileInformationByHandle(s->unix_endpoint, FileDispositionInfo,
+                                   &disposition, sizeof(disposition));
+        CloseHandle(s->unix_endpoint);
+    }
+#endif
 #ifndef _WIN32
     if (s->options.socket_path[0]) unlink(s->options.socket_path);
 #endif
@@ -346,7 +501,8 @@ static void *create(pr_core *core, const void *options, size_t size)
     const pa_options *input = options;
     if (!memchr(input->socket_path, '\0', sizeof(input->socket_path))) return NULL;
 #ifdef _WIN32
-    if (!got_advapi() || !pa_windows_class_name()) return NULL;
+    if (!got_advapi() || !pa_windows_class_name() ||
+        (input->client_only && input->socket_path[0])) return NULL;
 #else
     if (!valid_socket_path(input->socket_path)) return NULL;
 #endif
@@ -377,6 +533,7 @@ static void *create(pr_core *core, const void *options, size_t size)
     pageant_listener_got_socket(s->listener, socket);
     bool failed = error != NULL;
 #ifdef _WIN32
+    if (!failed) failed = !start_unix_listener(s);
     if (!failed) {
         s->legacy.vt = &legacy_vt; s->legacy.suppress_logging = true;
         pageant_register_client(&s->legacy); s->registered = true;

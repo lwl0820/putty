@@ -1,17 +1,24 @@
 /* 真实 WinAPI 对端；仅编译随机命名空间版本，绝不探测个人 Pageant。 */
+#include <winsock2.h>
+#include <afunix.h>
 #include <windows.h>
 #include "app/agent_codec.h"
 #include "core/pa_windows.h"
 #include "encrypted_fixture.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QDir>
+#include <QFile>
 #include <QProcess>
 #include <QThread>
 #include <QTimer>
 #include <cstdio>
+#include <atomic>
+#include <array>
 #include <future>
 #include <functional>
 #include <stdexcept>
+#include <string>
 
 #ifndef PA_WINDOWS_TEST_NAMESPACE
 #error 原生 IPC 测试必须编译到专用命名空间
@@ -19,7 +26,8 @@
 #ifdef NDEBUG
 #error 原生 IPC 测试必须保留断言
 #endif
-#define CHECK(value) do { if (!(value)) throw std::runtime_error(#value); } while (0)
+#define CHECK(value) do { if (!(value)) throw std::runtime_error( \
+    std::string("源码行 ") + std::to_string(__LINE__) + "：" #value); } while (0)
 extern "C" int pa_test_verify(const void *, size_t, const void *, size_t, const void *, size_t);
 extern "C" void *pa_test_stalled_pipe(void);
 extern "C" int pa_test_remote_query(void);
@@ -58,6 +66,65 @@ static QByteArray addKey()
 }
 static QByteArray signRequest(const QByteArray &message)
 { return QByteArray(1, char(13)) + string(publicKey()) + string(message) + number(0); }
+class WinsockSession {
+public:
+    WinsockSession() { WSADATA data{}; CHECK(WSAStartup(MAKEWORD(2, 2), &data) == 0); }
+    ~WinsockSession() { WSACleanup(); }
+};
+class UnixSocket {
+public:
+    explicit UnixSocket(const QByteArray &path)
+    {
+        CHECK(path.size() < qsizetype(sizeof(((SOCKADDR_UN *)nullptr)->sun_path)));
+        value = socket(AF_UNIX, SOCK_STREAM, 0);
+        CHECK(value != INVALID_SOCKET);
+        DWORD timeout = 8000;
+        if (setsockopt(value, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout)) ||
+            setsockopt(value, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout))) {
+            closesocket(value); value = INVALID_SOCKET; throw std::runtime_error("AF_UNIX 超时设置失败");
+        }
+        SOCKADDR_UN address{};
+        address.sun_family = AF_UNIX;
+        memcpy(address.sun_path, path.constData(), size_t(path.size() + 1));
+        if (connect(value, reinterpret_cast<const sockaddr *>(&address), sizeof(address))) {
+            closesocket(value); value = INVALID_SOCKET; throw std::runtime_error("AF_UNIX 连接失败");
+        }
+    }
+    UnixSocket(const UnixSocket &) = delete;
+    UnixSocket &operator=(const UnixSocket &) = delete;
+    ~UnixSocket() { if (value != INVALID_SOCKET) closesocket(value); }
+    SOCKET value = INVALID_SOCKET;
+};
+static QByteArray unixPath;
+static QByteArray unixQuery(const QByteArray &request, bool closing = false)
+{
+    UnixSocket socket(unixPath);
+    const auto bytes = framed(request);
+    qsizetype done = 0;
+    while (done < bytes.size()) {
+        const int count = send(socket.value, bytes.constData() + done, int(bytes.size() - done), 0);
+        CHECK(count > 0); done += count;
+    }
+    QByteArray response;
+    while (response.size() < 4 || response.size() < qsizetype(u32(response) + 4)) {
+        char block[4096];
+        const int count = recv(socket.value, block, sizeof(block), 0);
+        if (!count && closing) return {};
+        if (count == SOCKET_ERROR && closing &&
+            (WSAGetLastError() == WSAECONNRESET || WSAGetLastError() == WSAECONNABORTED)) return {};
+        CHECK(count > 0);
+        response.append(block, count);
+        CHECK(response.size() < 4 || u32(response) <= 262140);
+    }
+    CHECK(response.size() == qsizetype(u32(response) + 4));
+    return response.mid(4);
+}
+static QByteArray queryUnix(const QByteArray &request)
+{
+    auto future = std::async(std::launch::async, [=] { return unixQuery(request); });
+    CHECK(until([&] { return future.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready; }));
+    return future.get();
+}
 static QByteArray pipeQuery(const QByteArray &query)
 {
     char *name = pa_windows_pipe_name();
@@ -129,6 +196,43 @@ static void verify(bool legacy, const QByteArray &message)
     CHECK(pa_test_verify(blob.constData(), size_t(blob.size()), signature.constData(), size_t(signature.size()),
                          message.constData(), size_t(message.size())));
 }
+static void verifyUnix(const QByteArray &message)
+{
+    const auto response = queryUnix(signRequest(message));
+    CHECK(response.size() >= 5 && response[0] == char(14));
+    CHECK(u32(response, 1) == quint32(response.size() - 5));
+    const auto blob = publicKey(), signature = response.mid(5);
+    CHECK(pa_test_verify(blob.constData(), size_t(blob.size()), signature.constData(), size_t(signature.size()),
+                         message.constData(), size_t(message.size())));
+}
+static void socketOptions(pa_options &options, const QByteArray &path)
+{
+    CHECK(path.size() < qsizetype(sizeof(options.socket_path)));
+    memcpy(options.socket_path, path.constData(), size_t(path.size() + 1));
+}
+static void absentEndpoints()
+{
+    CHECK(!FindWindowA(pa_windows_class_name(), pa_windows_class_name()));
+    char *name = pa_windows_pipe_name();
+    WIN32_FIND_DATAA info{};
+    HANDLE found = FindFirstFileA(name, &info);
+    pa_windows_free(name);
+    if (found != INVALID_HANDLE_VALUE) FindClose(found);
+    CHECK(found == INVALID_HANDLE_VALUE);
+}
+static void rejectedUnixListener(const QByteArray &path)
+{
+    pa_options options{}; socketOptions(options, path);
+    Runtime runtime(pa_agent_module, QByteArray(reinterpret_cast<const char *>(&options), sizeof(options)));
+    bool ready = false, failed = false;
+    QObject::connect(&runtime, &Runtime::eventReceived, &runtime, [&](const Event &event) {
+        if (event.type == PR_EVENT_READY) ready = true;
+        if (event.type == PR_EVENT_ERROR) failed = true;
+    });
+    CHECK(until([&] { return ready || failed; }) && failed && !ready);
+    CHECK(until([&] { return runtime.isClosed(); }));
+    absentEndpoints();
+}
 static Command reply(Runtime &runtime, quint64 id, bool cancel)
 {
     Command command;
@@ -139,6 +243,70 @@ static Command reply(Runtime &runtime, quint64 id, bool cancel)
 }
 static void marker(const char *value)
 { std::puts(value); std::fflush(stdout); }
+static HANDLE unixReplaceGo, unixReplaceBound;
+static std::atomic_bool unixReplaceRequested{false}, unixReplaceSucceeded{false};
+extern "C" void pa_test_unix_after_bind(const char *path)
+{
+    if (!unixReplaceRequested.exchange(false)) return;
+    const auto wide = QString::fromUtf8(path);
+    /* 两个端点都属于本次私有夹具；只在测试变体中模拟外部进程抢换路径。 */
+    unixReplaceSucceeded = DeleteFileW(reinterpret_cast<LPCWSTR>(wide.utf16())) &&
+        SetEvent(unixReplaceGo) && WaitForSingleObject(unixReplaceBound, 2500) == WAIT_OBJECT_0;
+}
+static int replacementServer(const QString &path)
+{
+    const auto prefix = QByteArray(pa_windows_class_name());
+    HANDLE go = OpenEventA(SYNCHRONIZE, FALSE, (prefix + "-unix-replace-go").constData());
+    HANDLE bound = OpenEventA(EVENT_MODIFY_STATE, FALSE, (prefix + "-unix-replace-bound").constData());
+    HANDLE stop = OpenEventA(SYNCHRONIZE, FALSE, (prefix + "-unix-replace-stop").constData());
+    struct Resources {
+        HANDLE go, bound, stop;
+        SOCKET listener = INVALID_SOCKET;
+        std::array<SOCKET, 8> clients;
+        Resources(HANDLE go, HANDLE bound, HANDLE stop) : go(go), bound(bound), stop(stop)
+        { clients.fill(INVALID_SOCKET); }
+        ~Resources() {
+            for (auto socket : clients) if (socket != INVALID_SOCKET) closesocket(socket);
+            if (listener != INVALID_SOCKET) closesocket(listener);
+            if (go) CloseHandle(go);
+            if (bound) CloseHandle(bound);
+            if (stop) CloseHandle(stop);
+        }
+    } resources(go, bound, stop);
+    CHECK(go && bound && stop);
+    marker("armed");
+    CHECK(WaitForSingleObject(go, 8000) == WAIT_OBJECT_0);
+    const auto bytes = QDir::toNativeSeparators(path).toUtf8();
+    CHECK(bytes.size() < qsizetype(sizeof(((SOCKADDR_UN *)nullptr)->sun_path)));
+    resources.listener = socket(AF_UNIX, SOCK_STREAM, 0);
+    CHECK(resources.listener != INVALID_SOCKET);
+    CHECK(SetHandleInformation(reinterpret_cast<HANDLE>(resources.listener), HANDLE_FLAG_INHERIT, 0));
+    u_long nonblocking = 1;
+    CHECK(ioctlsocket(resources.listener, FIONBIO, &nonblocking) == 0);
+    SOCKADDR_UN address{}; address.sun_family = AF_UNIX;
+    memcpy(address.sun_path, bytes.constData(), size_t(bytes.size() + 1));
+    CHECK(bind(resources.listener, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) == 0);
+    CHECK(listen(resources.listener, 8) == 0 && SetEvent(bound));
+    QElapsedTimer total; total.start();
+    size_t count = 0;
+    while (WaitForSingleObject(stop, 0) == WAIT_TIMEOUT && total.elapsed() < 8000) {
+        fd_set readable; FD_ZERO(&readable); FD_SET(resources.listener, &readable);
+        timeval timeout{0, 50000};
+        const int result = select(0, &readable, nullptr, nullptr, &timeout);
+        CHECK(result != SOCKET_ERROR);
+        if (!result) continue;
+        SOCKET client = accept(resources.listener, nullptr, nullptr);
+        CHECK(client != INVALID_SOCKET);
+        if (count == resources.clients.size()) {
+            closesocket(client);
+            throw std::runtime_error("替换端点测试连接超限");
+        }
+        resources.clients[count++] = client;
+        CHECK(SetHandleInformation(reinterpret_cast<HANDLE>(client), HANDLE_FLAG_INHERIT, 0));
+    }
+    CHECK(WaitForSingleObject(stop, 0) == WAIT_OBJECT_0);
+    return 0;
+}
 static HANDLE stalledStop;
 static LRESULT CALLBACK stalledWindow(HWND window, UINT message, WPARAM wp, LPARAM lp)
 {
@@ -270,11 +438,98 @@ static void checkStalledClient(bool legacy, const QString &scope, bool fragmente
         CloseHandle(stop); CloseHandle(closeRequested); throw;
     }
 }
+static void unixPendingClose()
+{
+    pa_options options{}; socketOptions(options, unixPath);
+    Runtime runtime(pa_agent_module, QByteArray(reinterpret_cast<const char *>(&options), sizeof(options)));
+    bool ready = false, failed = false;
+    quint64 prompt = 0;
+    QObject::connect(&runtime, &Runtime::eventReceived, &runtime, [&](const Event &event) {
+        if (event.type == PR_EVENT_READY) ready = true;
+        if (event.type == PR_EVENT_ERROR) failed = true;
+        if (event.type == PR_EVENT_REQUEST) prompt = event.request;
+    });
+    CHECK(until([&] { return ready || failed; }) && ready && !failed);
+    const auto encrypted = QByteArray(1, char(27)) + string("add-ppk@putty.projects.tartarus.org") + string(encryptedFixture);
+    CHECK(queryUnix(encrypted) == QByteArray(1, char(6)));
+    auto pending = std::async(std::launch::async, [] { return unixQuery(signRequest("unix-pending-close"), true); });
+    CHECK(until([&] { return prompt != 0; }));
+    CHECK(pending.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready);
+    QElapsedTimer closing; closing.start(); runtime.close();
+    CHECK(closing.elapsed() < 500);
+    CHECK(until([&] { return runtime.isClosed(); }));
+    CHECK(until([&] { return pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready; }));
+    const auto response = pending.get();
+    CHECK(response.isEmpty() || response == QByteArray(1, char(5)));
+    CHECK(runtime.submit(reply(runtime, prompt, false)) == PR_CLOSING);
+    absentEndpoints();
+    CHECK(GetFileAttributesA(unixPath.constData()) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND);
+}
+static void checkReplacedUnixEndpoint(const QString &scope, const QString &path)
+{
+    const auto prefix = QByteArray(pa_windows_class_name());
+    unixReplaceGo = CreateEventA(nullptr, TRUE, FALSE, (prefix + "-unix-replace-go").constData());
+    const bool newGo = unixReplaceGo && GetLastError() != ERROR_ALREADY_EXISTS;
+    unixReplaceBound = CreateEventA(nullptr, TRUE, FALSE, (prefix + "-unix-replace-bound").constData());
+    const bool newBound = unixReplaceBound && GetLastError() != ERROR_ALREADY_EXISTS;
+    HANDLE stop = CreateEventA(nullptr, TRUE, FALSE, (prefix + "-unix-replace-stop").constData());
+    const bool newStop = stop && GetLastError() != ERROR_ALREADY_EXISTS;
+    struct Events {
+        HANDLE stop;
+        ~Events() {
+            unixReplaceRequested = false;
+            if (stop) CloseHandle(stop);
+            if (unixReplaceBound) CloseHandle(unixReplaceBound);
+            if (unixReplaceGo) CloseHandle(unixReplaceGo);
+            unixReplaceBound = unixReplaceGo = nullptr;
+        }
+    } events{stop};
+    CHECK(newGo && newBound && newStop);
+    HANDLE endpoint = INVALID_HANDLE_VALUE;
+    QProcess server;
+    try {
+        server.start(QCoreApplication::applicationFilePath(), {QStringLiteral("--replacement-unix"),
+            QStringLiteral("--scope"), scope, QStringLiteral("--unix-socket"), path});
+        CHECK(readMarker(server, "armed", 8000));
+        unixReplaceSucceeded = false;
+        unixReplaceRequested = true;
+        rejectedUnixListener(unixPath);
+        CHECK(unixReplaceSucceeded && !unixReplaceRequested);
+        endpoint = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), DELETE | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        CHECK(endpoint != INVALID_HANDLE_VALUE);
+        FILE_ATTRIBUTE_TAG_INFO tag{};
+        CHECK(GetFileInformationByHandleEx(endpoint, FileAttributeTagInfo, &tag, sizeof(tag)) &&
+              tag.ReparseTag == IO_REPARSE_TAG_AF_UNIX);
+        {
+            UnixSocket socket(unixPath);
+            ULONG pid = 0; DWORD returned = 0;
+            CHECK(WSAIoctl(socket.value, SIO_AF_UNIX_GETPEERPID, nullptr, 0, &pid, sizeof(pid),
+                           &returned, nullptr, nullptr) == 0);
+            CHECK(pid == ULONG(server.processId()) && pid != GetCurrentProcessId());
+        }
+        CHECK(SetEvent(stop));
+        CHECK(server.waitForFinished(3000) && server.exitStatus() == QProcess::NormalExit && server.exitCode() == 0);
+        FILE_DISPOSITION_INFO disposition{}; disposition.DeleteFile = TRUE;
+        CHECK(SetFileInformationByHandle(endpoint, FileDispositionInfo, &disposition, sizeof(disposition)));
+        CHECK(CloseHandle(endpoint)); endpoint = INVALID_HANDLE_VALUE;
+        CHECK(GetFileAttributesW(reinterpret_cast<LPCWSTR>(path.utf16())) == INVALID_FILE_ATTRIBUTES &&
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+    } catch (...) {
+        unixReplaceRequested = false;
+        SetEvent(stop);
+        if (!server.waitForFinished(3000)) { server.kill(); server.waitForFinished(3000); }
+        if (endpoint != INVALID_HANDLE_VALUE) CloseHandle(endpoint);
+        throw;
+    }
+}
 int main(int argc, char **argv)
 {
     pa_windows_prepare();
     QCoreApplication app(argc, argv);
     try {
+        WinsockSession winsock;
         CHECK(qEnvironmentVariable("PUTTY_SUITE_NATIVE_NO_STORAGE") == "1");
         const auto arguments = app.arguments();
         const auto scopeIndex = arguments.indexOf(QStringLiteral("--scope"));
@@ -282,6 +537,11 @@ int main(int argc, char **argv)
         const auto scope = arguments[scopeIndex + 1].toLatin1();
         CHECK(pa_windows_set_test_scope(scope.constData()));
         CHECK(QByteArray(pa_windows_class_name()).startsWith("SuitePageantTest-"));
+        if (arguments.contains(QStringLiteral("--replacement-unix"))) {
+            const auto index = arguments.indexOf(QStringLiteral("--unix-socket"));
+            CHECK(index >= 0 && index + 1 < arguments.size());
+            return replacementServer(arguments[index + 1]);
+        }
         if (arguments.contains(QStringLiteral("--stall-pipe"))) return stalledServer(false);
         if (arguments.contains(QStringLiteral("--stall-window"))) return stalledServer(true);
         if (arguments.contains(QStringLiteral("--fragmented-pipe"))) return stalledServer(false, true);
@@ -301,7 +561,28 @@ int main(int argc, char **argv)
             pa_windows_startup_unlock(lock); return existing ? 0 : 1;
         }
         CHECK(!existing);
-        pa_options options{};
+        const auto socketIndex = arguments.indexOf(QStringLiteral("--unix-socket"));
+        const auto blockedIndex = arguments.indexOf(QStringLiteral("--blocked-path"));
+        CHECK(socketIndex >= 0 && socketIndex + 1 < arguments.size());
+        CHECK(blockedIndex >= 0 && blockedIndex + 1 < arguments.size());
+        const auto path = QDir::toNativeSeparators(arguments[socketIndex + 1]);
+        unixPath = path.toLocal8Bit();
+        CHECK(QString::fromLocal8Bit(unixPath) == path);
+        const auto blockedPath = QDir::toNativeSeparators(arguments[blockedIndex + 1]);
+        const auto blocked = blockedPath.toLocal8Bit();
+        CHECK(QString::fromLocal8Bit(blocked) == blockedPath);
+        QFile preserved(blockedPath);
+        CHECK(preserved.open(QIODevice::ReadOnly));
+        const auto content = preserved.readAll(); preserved.close();
+        CHECK(content == "pageant-unix-existing-file-preserved\n");
+        rejectedUnixListener(blocked);
+        CHECK(preserved.open(QIODevice::ReadOnly) && preserved.readAll() == content); preserved.close();
+        const auto missing = QDir::toNativeSeparators(QDir::current().filePath(QStringLiteral("missing/agent.sock"))).toLocal8Bit();
+        rejectedUnixListener(missing);
+        CHECK(GetFileAttributesA(missing.constData()) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_PATH_NOT_FOUND);
+        rejectedUnixListener(QByteArray(1, char(0xff)));
+        checkReplacedUnixEndpoint(QString::fromLatin1(scope), path);
+        pa_options options{}; socketOptions(options, unixPath);
         Runtime runtime(pa_agent_module, QByteArray(reinterpret_cast<const char *>(&options), sizeof(options)));
         bool ready = false, failed = false;
         QList<quint64> prompts;
@@ -327,12 +608,20 @@ int main(int argc, char **argv)
         const auto list = QByteArray(1, char(11));
         CHECK(query(false, list) == QByteArray(1, char(12)) + number(0));
         CHECK(query(true, list) == QByteArray(1, char(12)) + number(0));
+        CHECK(queryUnix(list) == QByteArray(1, char(12)) + number(0));
         CHECK(query(false, addKey()) == QByteArray(1, char(6)));
         const auto listed = query(true, list);
         CHECK(listed.size() > 5 && listed[0] == char(12) && u32(listed, 1) == 1);
         CHECK(listed.mid(9, qsizetype(u32(listed, 5))) == publicKey());
+        CHECK(queryUnix(list) == listed);
         verify(false, QByteArrayLiteral("管道签名\0二进制"));
         verify(true, QByteArrayLiteral("旧窗口签名\0二进制"));
+        verifyUnix(QByteArrayLiteral("AF_UNIX 签名\0二进制"));
+        CHECK(queryUnix(QByteArray(1, char(19))) == QByteArray(1, char(6)));
+        CHECK(query(false, list) == QByteArray(1, char(12)) + number(0));
+        CHECK(query(true, list) == QByteArray(1, char(12)) + number(0));
+        CHECK(queryUnix(addKey()) == QByteArray(1, char(6)));
+        CHECK(query(false, list) == listed && query(true, list) == listed);
         COPYDATASTRUCT malformed{};
         malformed.dwData = 0x804e50ba;
         CHECK(!SendMessageA(window, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&malformed)));
@@ -343,6 +632,12 @@ int main(int argc, char **argv)
         CHECK(malformedReply.get() == QByteArray(1, char(5)));
         CHECK(query(true, QByteArray(1, char(19))) == QByteArray(1, char(6)));
         CHECK(query(false, list) == QByteArray(1, char(12)) + number(0));
+        CHECK(queryUnix(list) == QByteArray(1, char(12)) + number(0));
+        CHECK(query(true, addKey()) == QByteArray(1, char(6)));
+        CHECK(queryUnix(list) == listed && query(false, list) == listed);
+        CHECK(query(false, QByteArray(1, char(19))) == QByteArray(1, char(6)));
+        CHECK(queryUnix(list) == QByteArray(1, char(12)) + number(0));
+        CHECK(query(true, list) == QByteArray(1, char(12)) + number(0));
         // 固定 RFC8032 向量的有效加密 PPK，只经协议添加，不触及文件或原设置。
         const auto encrypted = QByteArray(1, char(27)) + string("add-ppk@putty.projects.tartarus.org") + string(encryptedFixture);
         CHECK(query(false, encrypted) == QByteArray(1, char(6)));
@@ -370,6 +665,9 @@ int main(int argc, char **argv)
         HANDLE partial = CreateFileA(pipeName, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
         pa_windows_free(pipeName); CHECK(partial != INVALID_HANDLE_VALUE);
         DWORD written = 0; CHECK(WriteFile(partial, "\0\0", 2, &written, NULL) && written == 2);
+        UnixSocket partialUnix(unixPath);
+        CHECK(send(partialUnix.value, "\0\0", 2, 0) == 2);
+        CHECK(queryUnix(list)[0] == char(12));
         QElapsedTimer closing; closing.start(); runtime.close();
         CHECK(closing.elapsed() < 500);
         CHECK(until([&] { return runtime.isClosed(); }));
@@ -382,15 +680,23 @@ int main(int argc, char **argv)
             return GetLastError() == ERROR_BROKEN_PIPE || GetLastError() == ERROR_PIPE_NOT_CONNECTED;
         }));
         CloseHandle(partial);
+        char unused;
+        const int end = recv(partialUnix.value, &unused, 1, 0);
+        CHECK(!end || (end == SOCKET_ERROR &&
+            (WSAGetLastError() == WSAECONNRESET || WSAGetLastError() == WSAECONNABORTED)));
+        CHECK(GetFileAttributesA(unixPath.constData()) == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND);
         CHECK(!FindWindowA(pa_windows_class_name(), pa_windows_class_name()));
         bool after = true; error = nullptr;
         lock = pa_windows_startup_lock(&after, &error);
         CHECK(lock && !error && !after); pa_windows_startup_unlock(lock);
+        unixPendingClose();
         std::puts("{\"schema\":1,\"kind\":\"pageant-ipc\",\"passed\":true,\"storage\":\"not-run\","
             "\"checks\":[\"startup-discovery\",\"dual-list\",\"pipe-add-wm-list\",\"dual-signatures\","
             "\"malformed-copydata\",\"malformed-mapping\",\"cross-transport-remove\",\"deferred-cancel\","
             "\"deferred-decrypt\",\"pending-close\",\"partial-pipe-close\",\"endpoint-cleanup\","
-            "\"stalled-pipe-client-close\",\"stalled-window-client-close\",\"fragmented-client-query\"]}");
+            "\"stalled-pipe-client-close\",\"stalled-window-client-close\",\"fragmented-client-query\","
+            "\"unix-list\",\"unix-cross-transport-keys\",\"unix-signature\",\"unix-existing-file-preserved\","
+            "\"unix-listener-failure-cleanup\",\"unix-partial-close\",\"unix-pending-close\",\"unix-endpoint-cleanup\"]}");
         return 0;
     } catch (const std::exception &error) {
         std::fprintf(stderr, "Windows Pageant IPC 失败：%s\n", error.what()); return 1;

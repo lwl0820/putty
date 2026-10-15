@@ -46,6 +46,14 @@ class RunnerChecks(unittest.TestCase):
                 runner.run(Path("pageant.exe"), runner.ROOT / ".tmp/unused")
             execute.assert_not_called()
 
+    def test_legacy_dual_transport_report_cannot_pass_unix_gate(self):
+        checks = sorted(check for check in runner.CHECKS if not check.startswith("unix-"))
+        report = {"schema": 1, "kind": "pageant-ipc", "passed": True,
+                  "storage": "not-run", "checks": checks}
+        self.assertEqual(len(checks), 15)
+        with self.assertRaises(runner.ValidationError):
+            runner.decode(json.dumps(report).encode())
+
 
 if __name__ == "__main__":
     unittest.main()

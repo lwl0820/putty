@@ -95,10 +95,18 @@ if(WIN32)
   add_dependencies(suite-terminal-keygen putty-terminal-keygen-build)
 
   set(_terminal_guard_dir "${PUTTY_SOURCE_DIR}/tools/suite/windows/storage")
+  # ANSI 存储变体单独编译，避免 Qt 的 UNICODE 定义改变上游 Win32 存储接口。
+  add_library(putty-terminal-windows-storage OBJECT
+    "${_terminal_guard_dir}/storage_variant.c" "${_terminal_guard_dir}/seed_guard.c")
+  target_link_libraries(putty-terminal-windows-storage PRIVATE suite-config suite-windows-hive)
+  target_compile_features(putty-terminal-windows-storage PRIVATE c_std_99)
+  if(MSVC)
+    target_compile_options(putty-terminal-windows-storage PRIVATE /we4013)
+  endif()
   add_executable(putty-terminal-windows-tests terminal_test.cpp
     ../src/ui/terminal_window.cpp ../src/ui/terminal_window.h
     windows/main.cpp windows/guarded_terminal.c windows/guarded_module.c windows/hive_bootstrap.c
-    "${_terminal_guard_dir}/storage_variant.c" "${_terminal_guard_dir}/seed_guard.c")
+    $<TARGET_OBJECTS:putty-terminal-windows-storage>)
   set_target_properties(putty-terminal-windows-tests PROPERTIES AUTOMOC ON)
   target_include_directories(putty-terminal-windows-tests PRIVATE "${_terminal_guard_dir}")
   target_link_libraries(putty-terminal-windows-tests PRIVATE putty-terminal suite-putty suite-windows-hive)

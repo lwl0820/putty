@@ -20,6 +20,8 @@ void TerminalController::close();
 
 Windows 同一 C 翻译单元同时使用 PuTTY 平台接口和 hive／Win32 头时，必须先包含 `putty.h`，由正式 `windows/platform.h` 建立 `winsock2.h`／`ws2tcpip.h` 后再包含 `windows.h`。不能先经 `private_hive.h` 间接引入旧 Winsock 头，再加载 PuTTY 头；也不能用忽略 SDK 重定义错误代替正确包含顺序。新增原生宿主须由 MSVC 实际编译确认，Linux 合同测试不能证明此项。
 
+受控上游 Windows 存储保持 ANSI Win32 接口，其 `storage_variant.c`／`seed_guard.c` 须在仅依赖 `suite-config`、hive 的独立非 Qt 对象目标中编译，再将对象直接注入终端宿主。保留存储变体对 `UNICODE` 的编译拒绝；不在 Qt 主目标全局取消 Unicode，也不用源文件全局属性影响其它宿主。实际生成命令须核对两侧宏隔离，MAP 仍须拒绝生产存储对象。
+
 ## 3. 所有权、顺序和容量
 
 - 唯一核心线程拥有 Terminal、Ldisc、Backend、Conf、客户端 PRNG、QFont 和可写 QImage。GUI 只消费独立完整帧与公开状态；禁止同步调用 GUI 字宽或等待 GUI 返回。

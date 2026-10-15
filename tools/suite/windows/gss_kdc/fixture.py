@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,35 @@ from .prepare import LOCK, source_hash
 from .process import BoundedProcess, run_bounded
 from .security import PrivateTree, closed_environment, digest
 from .proxy import DelayedKDCProxy
+
+
+def decode_metadata(payload):
+    """拒绝重复字段和非标准常量，避免末项覆盖启动或清理证据。"""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValidationError("KDC元数据存在重复字段")
+            result[key] = value
+        return result
+
+    def reject_constant(_):
+        raise ValidationError("KDC元数据包含非标准数值")
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValidationError("KDC元数据浮点数超出有限范围")
+        return result
+
+    try:
+        result = json.loads(payload, object_pairs_hook=unique, parse_constant=reject_constant,
+                            parse_float=finite_float)
+    except (ValueError, UnicodeError, RecursionError) as error:
+        raise ValidationError("KDC元数据不是严格JSON") from error
+    if not isinstance(result, dict):
+        raise ValidationError("KDC元数据必须为对象")
+    return result
 
 
 class PreparedKDC:
@@ -29,9 +59,10 @@ class PreparedKDC:
             path = tree.check_file(root / "prepared.json")
             if path.stat().st_size > 32768:
                 raise ValidationError("KDC准备状态过长")
-            state = json.loads(path.read_text(encoding="utf-8"))
+            state = decode_metadata(path.read_text(encoding="utf-8"))
             rid = "win-x64" if os.name == "nt" else "linux-x64"
-            if (state.get("schema") != 1 or state.get("source_sha256") != source_hash() or state.get("rid") != rid or
+            if (type(state.get("schema")) is not int or state["schema"] != 1 or
+                    state.get("source_sha256") != source_hash() or state.get("rid") != rid or
                     not isinstance(state.get("files"), dict) or not 2 <= len(state["files"]) <= 32):
                 raise ValidationError("KDC准备状态与当前源码/目标不符")
             artifact_name = state.get("artifact", "")
@@ -132,9 +163,10 @@ class PortableKDC:
             self.tree.check_file(self.policy_probes)
             self.child = BoundedProcess([self.prepared.dotnet, self.prepared.assembly, self.root],
                 cwd=self.root, environment=self.environment, timeout=90)
-            ready = json.loads(self.child.line().decode("utf-8"))
+            ready = decode_metadata(self.child.line().decode("utf-8"))
             if (set(ready) != {"schema", "ready", "realm", "client", "service", "kdc_port"} or
-                    ready["schema"] != 1 or ready["ready"] is not True or ready["realm"] != "SUITE.TEST" or
+                    type(ready["schema"]) is not int or ready["schema"] != 1 or
+                    ready["ready"] is not True or ready["realm"] != "SUITE.TEST" or
                     ready["client"] != "suite@SUITE.TEST" or ready["service"] != "host/localhost@SUITE.TEST" or
                     type(ready["kdc_port"]) is not int or not 1024 <= ready["kdc_port"] <= 65535):
                 raise ValidationError("KDC启动元数据非法")
@@ -200,10 +232,11 @@ class PortableKDC:
                     self.child.abort()
                 else:
                     self.child.finish(b"stop\n", deadline=deadline)
-                    summary = json.loads(self.child.line(timeout=1).decode("utf-8"))
+                    summary = decode_metadata(self.child.line(timeout=1).decode("utf-8"))
                     expected = {"schema", "stopped", "accepted", "completed", "rejected", "malformed",
                                 "as_requests", "tgs_requests", "active_connections", "active_workers"}
-                    if (set(summary) != expected or summary["schema"] != 1 or summary["stopped"] is not True or
+                    if (set(summary) != expected or type(summary["schema"]) is not int or
+                            summary["schema"] != 1 or summary["stopped"] is not True or
                             any(type(summary[name]) is not int or summary[name] < 0 for name in expected - {"schema", "stopped"}) or
                             summary["active_connections"] or summary["active_workers"]):
                         raise ValidationError("KDC关闭摘要非法或资源仍活跃")

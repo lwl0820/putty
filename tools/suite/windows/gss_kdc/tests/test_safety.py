@@ -19,7 +19,7 @@ from tools.suite.windows.gss_kdc.archive import MAX_FILE, SafeArchive
 from tools.suite.windows.gss_kdc.process import BoundedProcess, run_bounded
 from tools.suite.windows.gss_kdc.security import PrivateTree, closed_environment, publish_report
 from tools.suite.windows.gss_kdc.prepare import prepare
-from tools.suite.windows.gss_kdc.fixture import PortableKDC, PreparedKDC
+from tools.suite.windows.gss_kdc.fixture import PortableKDC, PreparedKDC, decode_metadata
 
 
 class SafetyTests(unittest.TestCase):
@@ -139,6 +139,107 @@ class SafetyTests(unittest.TestCase):
         finally:
             realm.child = None
             realm.close(failed=True)
+
+    def test_metadata_rejects_duplicate_fields_constants_and_nonobjects(self):
+        for payload in ('{"ready":false,"ready":true}', '{"nested":{"count":1,"count":0}}',
+                        '{"count":NaN}', '{"count":Infinity}', '{"count":-Infinity}',
+                        '{"count":1e309}', '{"nested":[-1e309]}', '[]', 'null', b'\xff'):
+            with self.subTest(payload=payload), self.assertRaises(ValidationError):
+                decode_metadata(payload)
+        self.assertEqual(decode_metadata('{"schema":1,"ready":true}'), {"schema": 1, "ready": True})
+        self.assertEqual(decode_metadata('{"count":1.25}'), {"count": 1.25})
+        # 各 Python 版本的解析器深度限制不同；统一转换其真实失败类型。
+        with mock.patch('tools.suite.windows.gss_kdc.fixture.json.loads', side_effect=RecursionError), \
+                self.assertRaises(ValidationError):
+            decode_metadata('{}')
+
+    def test_prepared_metadata_rejects_ambiguous_schema_and_nested_duplicate_before_sdk_access(self):
+        from tools.suite.windows.gss_kdc.prepare import source_hash
+        private = PrivateTree(self.root / 'prepared-metadata')
+        state = {"schema": 1, "source_sha256": source_hash(),
+                 "rid": 'win-x64' if os.name == 'nt' else 'linux-x64',
+                 "artifact": 'artifact-' + '0' * 32, "files": {"one.dll": '0' * 64, "two.dll": '1' * 64}}
+        path = private.write(private.root / 'prepared.json', b'{}')
+        payloads = [json.dumps(dict(state, schema=value)) for value in (True, 1.0)]
+        payloads.append(json.dumps(state).replace('"schema": 1', '"schema": false, "schema": 1'))
+        payloads.append(json.dumps(state).replace('"one.dll":', '"one.dll": "wrong", "one.dll":'))
+        try:
+            for payload in payloads:
+                with self.subTest(payload=payload):
+                    path.write_text(payload, encoding='utf-8')
+                    with mock.patch('tools.suite.windows.gss_kdc.fixture.SafeArchive') as archive:
+                        with self.assertRaises(ValidationError):
+                            PreparedKDC.from_directory(private.root)
+                        archive.assert_not_called()
+        finally:
+            private.close()
+
+    def test_ready_and_close_crlf_metadata_keeps_valid_protocol_and_cleanup(self):
+        prepared = PreparedKDC(self.root, Path(sys.executable), self.root / 'unused.dll', {})
+        ready = {"schema": 1, "ready": True, "realm": "SUITE.TEST", "client": "suite@SUITE.TEST",
+                 "service": "host/localhost@SUITE.TEST", "kdc_port": 12345}
+        summary = {"schema": 1, "stopped": True, "accepted": 0, "completed": 0, "rejected": 0,
+                   "malformed": 0, "as_requests": 0, "tgs_requests": 0,
+                   "active_connections": 0, "active_workers": 0}
+        realm = PortableKDC(prepared, parent=self.root)
+        child = mock.Mock()
+        child.line.side_effect = [(json.dumps(value) + '\r').encode('utf-8') for value in (ready, summary)]
+        proxy = mock.Mock(port=23456)
+        proxy.report.return_value = {"passed": True}
+        try:
+            with mock.patch('tools.suite.windows.gss_kdc.fixture.BoundedProcess', return_value=child), \
+                    mock.patch('tools.suite.windows.gss_kdc.fixture.DelayedKDCProxy', return_value=proxy):
+                realm.start()
+                realm.close()
+            self.assertTrue(realm._data_cleaned)
+            self.assertFalse(realm.root.exists())
+            self.assertTrue(realm.report()['passed'])
+            proxy.close.assert_called_once()
+            child.abort.assert_called()
+        finally:
+            realm.close(failed=True)
+
+    def test_ready_protocol_rejects_ambiguous_schema_before_proxy_start(self):
+        prepared = PreparedKDC(self.root, Path(sys.executable), self.root / 'unused.dll', {})
+        valid = {"schema": 1, "ready": True, "realm": "SUITE.TEST", "client": "suite@SUITE.TEST",
+                 "service": "host/localhost@SUITE.TEST", "kdc_port": 12345}
+        payloads = [json.dumps(dict(valid, schema=value)) for value in (True, 1.0)]
+        payloads.append(json.dumps(valid).replace('"ready": true', '"ready": false, "ready": true'))
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                realm = PortableKDC(prepared, parent=self.root)
+                child = mock.Mock()
+                child.line.return_value = payload.encode('utf-8')
+                with mock.patch('tools.suite.windows.gss_kdc.fixture.BoundedProcess', return_value=child), \
+                        mock.patch('tools.suite.windows.gss_kdc.fixture.DelayedKDCProxy') as proxy:
+                    with self.assertRaises(ValidationError):
+                        realm.start()
+                    proxy.assert_not_called()
+                child.abort.assert_called()
+                self.assertFalse(realm._data_cleaned)
+                self.assertTrue(realm.root.is_dir())
+                with self.assertRaises(ValidationError):
+                    realm.report()
+
+    def test_close_protocol_rejects_ambiguous_schema_and_keeps_failed_data(self):
+        prepared = PreparedKDC(self.root, Path(sys.executable), self.root / 'unused.dll', {})
+        valid = {"schema": 1, "stopped": True, "accepted": 0, "completed": 0, "rejected": 0,
+                 "malformed": 0, "as_requests": 0, "tgs_requests": 0,
+                 "active_connections": 0, "active_workers": 0}
+        payloads = [json.dumps(dict(valid, schema=value)) for value in (True, 1.0)]
+        payloads.append(json.dumps(valid).replace('"active_workers": 0', '"active_workers": 1, "active_workers": 0'))
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                realm = PortableKDC(prepared, parent=self.root)
+                realm.child = mock.Mock()
+                realm.child.line.return_value = payload.encode('utf-8')
+                with self.assertRaises(ValidationError):
+                    realm.close()
+                realm.child.abort.assert_called()
+                self.assertFalse(realm._data_cleaned)
+                self.assertTrue(realm.root.is_dir())
+                with self.assertRaises(ValidationError):
+                    realm.report()
 
     def test_prepare_failure_invalidates_previous_success_before_fetch(self):
         private = PrivateTree(self.root / 'prepared')
@@ -453,7 +554,7 @@ raise SystemExit(module.main(deadline_seconds=2))
             'stdout=sys.stdout,stderr=sys.stderr);print("ready",flush=True)')
         child = self.child(program, timeout=0.3)
         try:
-            self.assertEqual(child.line(), b'ready')
+            self.assertEqual(child.line(), b'ready\r' if os.name == 'nt' else b'ready')
             limit = time.monotonic() + 2
             while any(worker.is_alive() for worker in child._threads) and time.monotonic() < limit:
                 time.sleep(0.01)

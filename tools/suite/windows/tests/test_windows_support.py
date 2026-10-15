@@ -135,7 +135,7 @@ class WindowsContractTest(unittest.TestCase):
             installation(build, prefix, ["psftp"], "Release")
 
     def test_ctest_zero_missing_and_duplicate_are_failures(self):
-        good = {"tests": [{"name": "runtime-windows-handles"}, {"name": "runtime-windows-events"}]}
+        good = {"tests": [{"name": "runtime-windows-handles"}, {"name": "runtime-windows-events"}, {"name": "runtime-create-failure"}]}
         validate_selection(good)
         for tests in ([], good["tests"][:1], good["tests"] * 2):
             with self.subTest(tests=tests), self.assertRaises(ValidationError):
@@ -145,13 +145,31 @@ class WindowsContractTest(unittest.TestCase):
         path = self.root / "results.xml"
         for tag in ("", "<skipped/>", "<failure/>", "<error/>"):
             path.write_text('<testsuite><testcase name="runtime-windows-handles">' + tag +
-                            '</testcase><testcase name="runtime-windows-events"/>'
+                            '</testcase><testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/>'
                             '<testcase name="runtime-lifecycle"><skipped/></testcase></testsuite>', encoding="utf-8")
             if tag:
                 with self.assertRaises(ValidationError):
                     inspect_results(path)
             else:
                 self.assertEqual(inspect_results(path)["ctest_skipped"], ["runtime-lifecycle"])
+
+    def test_create_failure_regression_is_mandatory_and_must_actually_pass(self):
+        others = ["runtime-windows-handles", "runtime-windows-events"]
+        selection = [{"name": name} for name in others]
+        for tests in (selection, selection + [{"name": "runtime-create-failure"}] * 2):
+            with self.subTest(tests=tests), self.assertRaises(ValidationError):
+                validate_selection({"tests": tests})
+        path = self.root / "create-failure-results.xml"
+        baseline = ''.join('<testcase name="' + name + '"/>' for name in others)
+        bad_cases = ['', '<testcase name="runtime-create-failure"/>' * 2]
+        bad_cases += ['<testcase name="runtime-create-failure"><' + tag + '/></testcase>'
+                      for tag in ("skipped", "failure", "error")]
+        bad_cases += ['<testcase name="runtime-create-failure" status="' + status + '"/>'
+                      for status in ("notrun", "disabled", "skipped")]
+        for case in bad_cases:
+            path.write_text('<testsuite>' + baseline + case + '</testsuite>', encoding="utf-8")
+            with self.subTest(case=case), self.assertRaises(ValidationError):
+                inspect_results(path)
 
     def test_terminal_requires_exact_registered_set(self):
         tests = [{"name": name} for name in sorted(TERMINAL_EXPECTED)]
@@ -162,7 +180,7 @@ class WindowsContractTest(unittest.TestCase):
 
     def test_terminal_requires_four_actual_successes(self):
         path = self.root / "terminal-results.xml"
-        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/>'
         cases = ['<testcase name="' + name + '"/>' for name in sorted(TERMINAL_EXPECTED)]
 
         def write(terminal):
@@ -205,7 +223,7 @@ class WindowsContractTest(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(ValidationError):
                 validate_selection({"tests": changed}, TERMINAL_SSH_EXPECTED)
         native = ('<testcase name="runtime-windows-handles"/>'
-                  '<testcase name="runtime-windows-events"/>'
+                  '<testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/>'
                   '<testcase name="runtime-windows-hive"/>')
         cases = ['<testcase name="' + name + '"/>' for name in sorted(TERMINAL_SSH_EXPECTED)]
 
@@ -238,7 +256,7 @@ class WindowsContractTest(unittest.TestCase):
     def test_native_sspi_negative_never_claims_positive_authentication(self):
         path = self.root / "sspi-results.xml"
         validate_selection({"tests": [{"name": "terminal-windows-sspi-negative"}]}, SSPI_NEGATIVE_EXPECTED)
-        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/>'
         good = '<testcase name="terminal-windows-sspi-negative"/>'
         path.write_text('<testsuite>' + native + good + '</testsuite>', encoding="utf-8")
         report = inspect_results(path, require_sspi_negative=True)
@@ -260,7 +278,7 @@ class WindowsContractTest(unittest.TestCase):
         for changed in ([], tests[:-1], tests + tests[:1]):
             with self.subTest(changed=changed), self.assertRaises(ValidationError):
                 validate_selection({"tests": changed}, PAGEANT_EXPECTED)
-        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/>'
         cases = ['<testcase name="' + name + '"/>' for name in sorted(PAGEANT_EXPECTED)]
 
         def write(pageant):
@@ -288,7 +306,7 @@ class WindowsContractTest(unittest.TestCase):
 
     def test_hive_requirement_rejects_missing_duplicate_skipped_and_failed(self):
         path = self.root / "hive-results.xml"
-        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/>'
         good = '<testcase name="runtime-windows-hive"/>'
         path.write_text('<testsuite>' + native + good + '</testsuite>', encoding="utf-8")
         self.assertEqual(inspect_results(path, True)["private_hive_probe"], "passed")
@@ -304,14 +322,14 @@ class WindowsContractTest(unittest.TestCase):
 
         for status in ("notrun", "disabled", "skipped"):
             path.write_text('<testsuite><testcase name="runtime-windows-handles" status="' + status +
-                            '"/><testcase name="runtime-windows-events"/></testsuite>', encoding="utf-8")
+                            '"/><testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/></testsuite>', encoding="utf-8")
             with self.subTest(status=status), self.assertRaises(ValidationError):
                 inspect_results(path)
 
     def test_storage_requires_hive_and_one_actual_success(self):
         path = self.root / "storage-results.xml"
         native = ('<testcase name="runtime-windows-handles"/>'
-                  '<testcase name="runtime-windows-events"/>'
+                  '<testcase name="runtime-windows-events"/><testcase name="runtime-create-failure"/>'
                   '<testcase name="runtime-windows-hive"/>')
         good = '<testcase name="runtime-windows-storage"/>'
         path.write_text('<testsuite>' + native + good + '</testsuite>', encoding="utf-8")

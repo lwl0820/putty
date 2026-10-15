@@ -12,7 +12,23 @@ add_test(NAME runtime-lifecycle COMMAND "${Python3_EXECUTABLE}" -B
     --parent "${PROJECT_SOURCE_DIR}/.tmp/runtime-tests-${_runtime_build_id}")
 set_tests_properties(runtime-lifecycle PROPERTIES LABELS runtime TIMEOUT 30 SKIP_RETURN_CODE 77)
 
+# 模块创建失败不访问存储、PRNG 或 socket；保留真实核心和上游计时器实现。
+add_executable(suite-runtime-create-failure-tests create_failure_test.c windows/no_storage.c)
+target_link_libraries(suite-runtime-create-failure-tests PRIVATE putty-runtime suite-putty)
+if(MSVC)
+  target_link_options(suite-runtime-create-failure-tests PRIVATE
+    "/MAP:$<TARGET_FILE:suite-runtime-create-failure-tests>.map"
+    /INCLUDE:read_random_seed /INCLUDE:write_random_seed
+    /INCLUDE:open_settings_r /INCLUDE:open_settings_w)
+elseif(UNIX)
+  target_link_options(suite-runtime-create-failure-tests PRIVATE
+    "-Wl,-Map,$<TARGET_FILE:suite-runtime-create-failure-tests>.map")
+endif()
+add_test(NAME runtime-create-failure COMMAND suite-runtime-create-failure-tests)
+set_tests_properties(runtime-create-failure PROPERTIES LABELS "runtime;no-storage" TIMEOUT 15)
+
 if(WIN32)
+  set_property(TEST runtime-create-failure APPEND PROPERTY LABELS windows-native)
   target_sources(putty-runtime-tests PRIVATE "${PROJECT_SOURCE_DIR}/vendor/putty/windows/no-jump-list.c")
   # 原生事件宿主禁止初始化存储和 PRNG；hive 验证完成前不启用持久化测试。
   add_executable(suite-windows-handle-tests windows/native_handle_wait.c)

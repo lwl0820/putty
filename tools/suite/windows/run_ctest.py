@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 from support import TEMPORARY_ROOT, ValidationError, project_path, write_report
 
-EXPECTED = {"runtime-windows-handles", "runtime-windows-events"}
+EXPECTED = {"runtime-windows-handles", "runtime-windows-events", "runtime-create-failure"}
 HIVE_EXPECTED = {"runtime-windows-hive"}
 STORAGE_EXPECTED = {"runtime-windows-storage"}
 TERMINAL_EXPECTED = {"terminal-cpu-render", "terminal-windows-platform",
@@ -30,8 +30,8 @@ def inspect_results(path, require_hive=False, require_storage=False, require_ter
     root = ET.parse(path).getroot()
     cases = root.findall(".//testcase")
     native = [case for case in cases if case.get("name") in EXPECTED]
-    if len(native) != 2 or {case.get("name") for case in native} != EXPECTED:
-        raise ValidationError("JUnit 中缺少两个实际 Windows 原生结果")
+    if len(native) != len(EXPECTED) or {case.get("name") for case in native} != EXPECTED:
+        raise ValidationError("JUnit 中 Windows 必需原生结果缺失或重复")
     for case in native:
         if (case.find("skipped") is not None or case.find("failure") is not None or case.find("error") is not None or
                 case.get("status", "run").lower() in {"notrun", "disabled", "skipped"}):

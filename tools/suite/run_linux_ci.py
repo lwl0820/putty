@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[2]
 TEMPORARY_ROOT = ROOT / ".tmp"
 REQUIRED = {
-    "suite-fixture", "runtime-lifecycle", "runtime-handle-registration",
+    "suite-fixture", "runtime-lifecycle", "runtime-handle-registration", "runtime-create-failure",
     "runtime-core-link", "runtime-agent-core-link",
     "terminal-gss-mic-failures", "terminal-sspi-mic-failures-shim", "terminal-sspi-init-failures-shim",
     "terminal-cpu-render", "terminal-render-bounds", "terminal-runner-report-paths",

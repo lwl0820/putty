@@ -44,6 +44,24 @@ class LinuxCIContractTest(unittest.TestCase):
             with self.subTest(body=body), self.assertRaises(ValueError):
                 CI.inspect_results(path, {"first"})
 
+    def test_create_failure_regression_cannot_disappear_from_linux_ci(self):
+        others = CI.REQUIRED - {"runtime-create-failure"}
+        selection = [{"name": name} for name in sorted(others)]
+        for tests in (selection, selection + [{"name": "runtime-create-failure"}] * 2):
+            with self.subTest(tests=tests), self.assertRaises(ValueError):
+                CI.selection_names({"tests": tests})
+        path = self.root / "create-failure.xml"
+        baseline = ''.join('<testcase name="' + name + '"/>' for name in sorted(others))
+        bad_cases = ['', '<testcase name="runtime-create-failure"/>' * 2]
+        bad_cases += ['<testcase name="runtime-create-failure"><' + tag + '/></testcase>'
+                      for tag in ("skipped", "failure", "error")]
+        bad_cases += ['<testcase name="runtime-create-failure" status="' + status + '"/>'
+                      for status in ("notrun", "disabled", "skipped")]
+        for case in bad_cases:
+            path.write_text('<testsuite>' + baseline + case + '</testsuite>', encoding="utf-8")
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                CI.inspect_results(path, CI.REQUIRED)
+
     def test_reports_contain_only_summary_fields(self):
         path = self.root / "result.xml"
         path.write_text('<testsuite><testcase name="first" time="1.5"><system-out>私有测试内容</system-out></testcase></testsuite>', encoding="utf-8")

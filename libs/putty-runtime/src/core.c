@@ -460,10 +460,11 @@ void pr_core_destroy(pr_core *core)
     assert(core->dispatch_depth == 0);
     pr_core_begin_close(core);
     /* 模块析构可新增上游回调，最终清扫必须在析构之后。 */
-    if (core->module_context)
+    if (core->module_context) {
         core->module.destroy(core->module_context);
-    delete_callbacks_for_context(core->module_context);
-    expire_timer_context(core->module_context);
+        delete_callbacks_for_context(core->module_context);
+        expire_timer_context(core->module_context);
+    }
     while ((work = core->work) != NULL) {
         core->work = work->next;
         delete_callbacks_for_context(work);

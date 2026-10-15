@@ -193,7 +193,8 @@ private:
         }
         for (const auto watch : handles) {
             if (handles_.count(watch.registration)) continue;
-            auto *notifier = new QWinEventNotifier(reinterpret_cast<HANDLE>(watch.handle), this);
+            auto *notifier = new QWinEventNotifier(
+                reinterpret_cast<Qt::HANDLE>(watch.handle), this);
             handles_.emplace(watch.registration, Handle{watch, notifier});
             connect(notifier, &QWinEventNotifier::activated, this,
                 [this, watch, notifier] {

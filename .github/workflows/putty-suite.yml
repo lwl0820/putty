@@ -40,6 +40,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B -m unittest discover -s tools/suite/windows/hive/tests -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B -m unittest discover -s tools/suite/windows/storage/tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: 无 Qt 全关闭配置与构建
         shell: pwsh
         run: |
@@ -89,11 +91,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B tools/suite/windows/check_build.py --build .tmp/build/windows-release --prefix .tmp/windows-ci/install-release --components plink pscp psftp --assertions
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: 执行原生事件与私有 hive 宿主并核对实际结果
+      - name: 执行原生事件、私有 hive 与受控上游存储并核对实际结果
         shell: pwsh
         run: |
           $env:PATH = "$PWD/.tmp/qt/bin;$env:PATH"
-          python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive
+          python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # 只上传明确报告和合法程序，禁止扩为 .tmp 或整个 runtime/cache/hive 树。
       - uses: actions/upload-artifact@v4
@@ -104,9 +106,11 @@ jobs:
             .tmp/windows-ci/reports/*.json
             .tmp/windows-ci/reports/*.xml
             .tmp/windows-hive-reports/private-hive.json
+            .tmp/windows-storage-reports/private-storage.json
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-handle-tests.exe
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-runtime-tests.exe
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-hive-tests.exe
+            .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-storage-tests.exe
             .tmp/windows-ci/install-release/bin/plink.exe
             .tmp/windows-ci/install-release/bin/pscp.exe
             .tmp/windows-ci/install-release/bin/psftp.exe

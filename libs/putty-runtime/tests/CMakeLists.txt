@@ -63,6 +63,26 @@ if(WIN32)
     --parent "${PROJECT_SOURCE_DIR}/.tmp/windows-hive-${_runtime_build_id}")
   set_tests_properties(runtime-windows-hive PROPERTIES
     LABELS "runtime;windows-hive" TIMEOUT 90)
+
+  # 上游存储使用独立测试变体，随机种子访问失败时必须禁止个人路径回退。
+  set(_suite_storage_dir "${PROJECT_SOURCE_DIR}/tools/suite/windows/storage")
+  add_executable(suite-windows-storage-tests
+    "${_suite_storage_dir}/storage_variant.c" "${_suite_storage_dir}/seed_guard.c"
+    "${_suite_storage_dir}/storage_test.c" "${_suite_storage_dir}/frontend.c"
+    "${PROJECT_SOURCE_DIR}/vendor/putty/windows/no-jump-list.c")
+  target_link_libraries(suite-windows-storage-tests PRIVATE suite-windows-hive suite-putty)
+  target_compile_definitions(suite-windows-storage-tests PRIVATE
+    SUITE_STORAGE_PROJECT_TMP="${PROJECT_SOURCE_DIR}/.tmp")
+  if(MSVC)
+    target_link_options(suite-windows-storage-tests PRIVATE
+      "/MAP:$<TARGET_FILE:suite-windows-storage-tests>.map")
+  endif()
+  add_test(NAME runtime-windows-storage COMMAND "${Python3_EXECUTABLE}" -B
+    "${_suite_storage_dir}/run_storage_test.py"
+    --binary "$<TARGET_FILE:suite-windows-storage-tests>"
+    --parent "${PROJECT_SOURCE_DIR}/.tmp/windows-storage-${_runtime_build_id}")
+  set_tests_properties(runtime-windows-storage PROPERTIES
+    LABELS "runtime;windows-storage" TIMEOUT 120)
 endif()
 
 # 此 Unix 宿主不依赖 Qt；Windows 原生存储宿主待独立隔离夹具接入。

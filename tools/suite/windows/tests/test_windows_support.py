@@ -183,6 +183,32 @@ class WindowsContractTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(ValidationError):
                 inspect_results(path)
 
+    def test_storage_requires_hive_and_one_actual_success(self):
+        path = self.root / "storage-results.xml"
+        native = ('<testcase name="runtime-windows-handles"/>'
+                  '<testcase name="runtime-windows-events"/>'
+                  '<testcase name="runtime-windows-hive"/>')
+        good = '<testcase name="runtime-windows-storage"/>'
+        path.write_text('<testsuite>' + native + good + '</testsuite>', encoding="utf-8")
+        report = inspect_results(path, True, True)
+        self.assertEqual(report["private_upstream_storage"], "passed")
+        self.assertNotIn("hkcu-isolation", report["unverified"])
+        self.assertNotIn("random-seed-storage", report["unverified"])
+        self.assertIn("production-seed-fallback", report["unverified"])
+        self.assertIn("existing-runtime-storage", report["unverified"])
+        with self.assertRaises(ValidationError):
+            inspect_results(path, False, True)
+        for storage in ('', good * 2,
+                        '<testcase name="runtime-windows-storage"><skipped/></testcase>',
+                        '<testcase name="runtime-windows-storage"><failure/></testcase>',
+                        '<testcase name="runtime-windows-storage"><error/></testcase>',
+                        '<testcase name="runtime-windows-storage" status="notrun"/>',
+                        '<testcase name="runtime-windows-storage" status="disabled"/>',
+                        '<testcase name="runtime-windows-storage" status="skipped"/>'):
+            path.write_text('<testsuite>' + native + storage + '</testsuite>', encoding="utf-8")
+            with self.subTest(storage=storage), self.assertRaises(ValidationError):
+                inspect_results(path, True, True)
+
 
 if __name__ == "__main__":
     unittest.main()

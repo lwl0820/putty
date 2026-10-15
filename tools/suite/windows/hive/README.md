@@ -36,6 +36,6 @@ CTest 名为 `runtime-windows-hive`，标签 `runtime;windows-hive`，超时 90 
 
 唯一可上传报告为 `.tmp/windows-hive-reports/private-hive.json`。不要上传 `windows-hive*/`、hive、seed 或日志树，也不要自动把此报告转换成旧 runtime/CLI 可运行许可。
 
-当前本机仅 5 项 Python 回归通过；原生 DLL、ACL、hive/日志实际行为、跨进程加载均等待第二批 Windows CI。微软官方说明 [`RegLoadAppKeyW`](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regloadappkeyw) 可在缺失路径创建空 hive，并要求各参与进程自己调用；[`RegOverridePredefKey`](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regoverridepredefkey) 只影响调用进程。本实现没有修改 app hive 内部注册表键的安全描述符，文件 DACL 与内部注册表键 SD 是不同对象。
+2026-10-15 的[第三轮仓库 Windows CI](https://github.com/lwl0820/putty/actions/runs/38664741693) 已在 Windows Server2022 x64／MSVC19.44 实际编译并通过本宿主，运行器验证10项完整集合、清理和全部上游组仍为 `not-run`。该证据对应提交 `69e7607bd105b15b24901b6aac559ad1eefba295`。本机 Linux 的5项 Python回归另记为脚本证据，不能替代此原生结果。微软官方说明 [`RegLoadAppKeyW`](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regloadappkeyw) 可在缺失路径创建空 hive，并要求各参与进程自己调用；[`RegOverridePredefKey`](https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regoverridepredefkey) 只影响调用进程。本实现没有修改 app hive 内部注册表键的安全描述符，文件 DACL 与内部注册表键 SD 是不同对象。
 
 后续真实上游探针必须先有本阶段 Windows 通过证据，再逐进程初始化，并证明 session、host key、CA 和实际 seed 读写落点。固定上游 Windows seed 路径在配置失败时会回退 APPDATA/用户目录/Windows；仅设置 RandSeedFile 或环境变量不构成禁止回退的证明。未建立实际失败钩子和落点证据前，继续禁止上游 PRNG 和原版 CLI 自动运行。

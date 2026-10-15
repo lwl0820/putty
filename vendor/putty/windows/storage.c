@@ -430,7 +430,7 @@ void enum_host_ca_finish(host_ca_enum *e)
 host_ca *host_ca_load(const char *name)
 {
     strbuf *sb;
-    const char *s;
+    char *s;
 
     sb = strbuf_new();
     escape_registry_key(name, sb);
@@ -445,12 +445,15 @@ host_ca *host_ca_load(const char *name)
 
     DWORD val;
 
-    if ((s = get_reg_sz(rkey, "PublicKey")) != NULL)
+    if ((s = get_reg_sz(rkey, "PublicKey")) != NULL) {
         hca->ca_public_key = base64_decode_sb(ptrlen_from_asciz(s));
+        sfree(s);
+    }
 
     if ((s = get_reg_sz(rkey, "Validity")) != NULL) {
         hca->validity_expression = strbuf_to_str(
             percent_decode_sb(ptrlen_from_asciz(s)));
+        sfree(s);
     } else if ((sb = get_reg_multi_sz(rkey, "MatchHosts")) != NULL) {
         BinarySource src[1];
         BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(sb));
@@ -462,6 +465,7 @@ host_ca *host_ca_load(const char *name)
 
         hca->validity_expression = cert_expr_expression(eb);
         cert_expr_builder_free(eb);
+        strbuf_free(sb);
     }
 
     if (get_reg_dword(rkey, "PermitRSASHA1", &val))
@@ -519,6 +523,7 @@ char *host_ca_delete(const char *name)
     escape_registry_key(name, sb);
     del_regkey(rkey, sb->s);
     strbuf_free(sb);
+    close_regkey(rkey);
 
     return NULL;
 }

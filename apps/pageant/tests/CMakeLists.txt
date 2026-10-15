@@ -49,3 +49,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
     set_tests_properties(pageant-gui-${scenario} PROPERTIES LABELS "pageant;gui" TIMEOUT 40)
   endforeach()
 endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME pageant-windows-runner-contract COMMAND "${Python3_EXECUTABLE}" -B
+  "${CMAKE_CURRENT_SOURCE_DIR}/windows/test_runner.py")
+set_tests_properties(pageant-windows-runner-contract PROPERTIES LABELS "pageant;test-support" TIMEOUT 15)
+if(WIN32)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  set_property(TEST pageant-windows-runner-contract APPEND PROPERTY LABELS windows-pageant)
+  # 只测试随机编译名，产品仍使用原版名称，不接受环境变量改名。
+  string(RANDOM LENGTH 32 ALPHABET 0123456789abcdef pageant_native_namespace)
+  pageant_agent_library(pageant-test-windows-agent)
+  target_compile_definitions(pageant-test-windows-agent PUBLIC
+    PA_WINDOWS_TEST_NAMESPACE="SuitePageantTest-${pageant_native_namespace}")
+  add_executable(pageant-windows-ipc-tests windows/native_ipc.cpp windows/verify.c
+    windows/no_storage.c "${PROJECT_SOURCE_DIR}/vendor/putty/stubs/no-console.c")
+  target_link_libraries(pageant-windows-ipc-tests PRIVATE pageant-test-windows-agent suite-pageant-core)
+  suite_add_backend_list(pageant-windows-ipc-tests Pageant)
+  if(MSVC)
+    target_link_options(pageant-windows-ipc-tests PRIVATE
+      "/MAP:$<TARGET_FILE:pageant-windows-ipc-tests>.map"
+      /INCLUDE:read_random_seed /INCLUDE:write_random_seed
+      /INCLUDE:open_settings_r /INCLUDE:open_settings_w)
+  endif()
+  add_test(NAME pageant-windows-ipc COMMAND "${Python3_EXECUTABLE}" -B
+    "${CMAKE_CURRENT_SOURCE_DIR}/windows/run_ipc_test.py"
+    --binary "$<TARGET_FILE:pageant-windows-ipc-tests>"
+    --parent "${PROJECT_SOURCE_DIR}/.tmp/pageant-windows-ipc")
+  set_tests_properties(pageant-windows-ipc PROPERTIES LABELS "pageant;windows-pageant;agent"
+    RUN_SERIAL TRUE TIMEOUT 90)
+endif()

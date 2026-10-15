@@ -80,22 +80,24 @@ jobs:
             python tools/qt/build_qt.py --prefix .tmp/qt --work .tmp/qt-build --jobs 4
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-      - name: 构建共享运行时、终端和三个 CLI
+      - name: 构建共享运行时、两个 GUI 和三个 CLI
         shell: pwsh
         run: |
-          cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
+          cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PAGEANT=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build .tmp/build/windows-release --parallel 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --install .tmp/build/windows-release --prefix "$PWD/.tmp/windows-ci/install-release"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($component in @('plink', 'pscp', 'psftp')) {
+            cmake --install .tmp/build/windows-release --prefix "$PWD/.tmp/windows-ci/install-release" --component $component
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           python -B tools/suite/windows/check_build.py --build .tmp/build/windows-release --prefix .tmp/windows-ci/install-release --components plink pscp psftp --assertions
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: 执行原生事件、终端和受控存储并核对实际结果
+      - name: 执行原生事件、两个 GUI 宿主和受控存储并核对实际结果
         shell: pwsh
         run: |
           $env:PATH = "$PWD/.tmp/qt/bin;$env:PATH"
-          python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage --require-terminal
+          python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage --require-terminal --require-pageant
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # 只上传明确报告和合法程序，禁止扩为 .tmp 或整个 runtime/cache/hive 树。
       - uses: actions/upload-artifact@v4
@@ -111,6 +113,7 @@ jobs:
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-runtime-tests.exe
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-hive-tests.exe
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-storage-tests.exe
+            .tmp/build/windows-release/apps/pageant/tests/pageant-windows-ipc-tests.exe
             .tmp/windows-ci/install-release/bin/plink.exe
             .tmp/windows-ci/install-release/bin/pscp.exe
             .tmp/windows-ci/install-release/bin/psftp.exe

@@ -18,7 +18,7 @@ REQUIRED = {
     "terminal-gss-mic-failures", "terminal-sspi-mic-failures-shim",
     "terminal-cpu-render", "terminal-render-bounds", "terminal-runner-report-paths",
     "terminal-ssh-kdf-render", "terminal-gss-render-close",
-    "pageant-core-interop", "pageant-original-cli-entry",
+    "pageant-core-interop", "pageant-original-cli-entry", "pageant-windows-runner-contract",
 }
 for component in ("plink", "pscp", "psftp"):
     REQUIRED.update(f"cli-{component}-{scenario}" for scenario in ("local", "sftp"))

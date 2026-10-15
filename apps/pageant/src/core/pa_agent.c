@@ -4,7 +4,10 @@
 #include "pageant.h"
 #include <limits.h>
 #include <errno.h>
-#ifndef _WIN32
+#ifdef _WIN32
+#include "pa_windows.h"
+#include "security-api.h"
+#else
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -34,6 +37,11 @@ struct pa_state {
     unsigned outputs;
     bool dirty, queued, destroying;
     pa_options options;
+#ifdef _WIN32
+    pa_windows_ipc *ipc;
+    PageantClient legacy;
+    bool registered;
+#endif
 };
 static pa_state *active;
 static void flush(void *context);
@@ -88,10 +96,13 @@ static void result(pa_state *s, uint32_t action, uint32_t code,
     if (length > 4096) length = 4096;
     retain(s, header, detail, length, request, PR_EVENT_DATA);
 }
+typedef struct pa_snapshot { strbuf *rows; uint32_t count; } pa_snapshot;
 static void snapshot_row(void *ctx, char **fingerprints, const char *comment,
                          uint32_t flags, struct pageant_pubkey *key)
 {
-    strbuf *buf = ctx;
+    pa_snapshot *snapshot = ctx;
+    strbuf *buf = snapshot->rows;
+    snapshot->count++;
     const char *fp = fingerprints[SSH_FPTYPE_SHA256];
     if (!fp) fp = fingerprints[SSH_FPTYPE_MD5];
     if (!fp) fp = "";
@@ -189,6 +200,26 @@ static bool ask(PageantListenerClient *client, PageantClientDialogId *id,
 static void log_message(PageantListenerClient *client, const char *fmt, va_list ap)
 { (void)client; (void)fmt; (void)ap; }
 static const PageantListenerClientVtable listener_vt = {log_message, ask};
+#ifdef _WIN32
+static void legacy_request(void *context, const void *data, size_t size)
+{
+    pa_state *s = context;
+    if (!s->destroying && !pr_core_is_closing(s->core))
+        pageant_handle_msg(&s->legacy, NULL, make_ptrlen(data, size));
+}
+static void legacy_response(PageantClient *client, PageantClientRequestId *id, ptrlen response)
+{
+    (void)id;
+    pa_state *s = container_of(client, pa_state, legacy);
+    if (s->ipc) pa_windows_ipc_reply(s->ipc, response.ptr, response.len);
+}
+static bool legacy_ask(PageantClient *client, PageantClientDialogId *dialog, const char *comment)
+{
+    pa_state *s = container_of(client, pa_state, legacy);
+    return ask(&s->client, dialog, comment);
+}
+static const PageantClientVtable legacy_vt = {NULL, legacy_response, legacy_ask};
+#endif
 static void flush(void *context)
 {
     pa_state *s = context;
@@ -215,12 +246,16 @@ static void flush(void *context)
         p->announced = true;
     }
     if (s->dirty) {
-        strbuf *rows = strbuf_new();
+        pa_snapshot snapshot = {strbuf_new(), 0};
+        strbuf *rows = snapshot.rows;
         char *error = NULL;
-        int status = pageant_enum_keys(snapshot_row, rows, &error);
+        int status = pageant_enum_keys(snapshot_row, &snapshot, &error);
+#ifdef _WIN32
+        if (s->options.client_only && pa_windows_query_failed()) status = PAGEANT_ACTION_FAILURE;
+#endif
         pa_packet header = {0};
         header.kind = PA_SNAPSHOT;
-        header.count = (uint32_t)(pageant_count_ssh1_keys() + pageant_count_ssh2_keys());
+        header.count = snapshot.count;
         if (status != PAGEANT_ACTION_OK || rows->len > PA_MAX_PUBLIC_BYTES) {
             header.result = PA_FAILURE;
             header.count = 0;
@@ -275,8 +310,15 @@ static void destroy(void *context)
 {
     pa_state *s = context;
     s->destroying = true;
+#ifdef _WIN32
+    /* 先解除旧 IPC 的同步等待，再撤销上游客户端与在途提示。 */
+    pa_windows_ipc_stop(s->ipc); s->ipc = NULL;
+#endif
     /* Runtime 先撤销请求；这里也覆盖 create 失败后的部分初始化。 */
     cancel_prompts(s);
+#ifdef _WIN32
+    if (s->registered) pageant_unregister_client(&s->legacy);
+#endif
     if (s->listener) {
         pageant_listener_shutdown_connections(s->listener);
         pageant_listener_free(s->listener);
@@ -284,7 +326,11 @@ static void destroy(void *context)
 #ifndef _WIN32
     if (s->options.socket_path[0]) unlink(s->options.socket_path);
 #endif
+#ifdef _WIN32
+    if (!s->options.client_only) pageant_delete_all();
+#else
     pageant_delete_all();
+#endif
     pageant_forget_passphrases();
     while (s->head) {
         pa_output *out = s->head;
@@ -300,33 +346,65 @@ static void *create(pr_core *core, const void *options, size_t size)
     const pa_options *input = options;
     if (!memchr(input->socket_path, '\0', sizeof(input->socket_path))) return NULL;
 #ifdef _WIN32
-    /* Windows 双 IPC 在原生适配阶段接入，不能暴露一个貌似可用的代理。 */
-    (void)core; return NULL;
+    if (!got_advapi() || !pa_windows_class_name()) return NULL;
 #else
     if (!valid_socket_path(input->socket_path)) return NULL;
+#endif
     pa_state *s = snew(pa_state);
     memset(s, 0, sizeof(*s));
     s->core = core; s->options = *input; s->tail = &s->head;
     s->client.vt = &listener_vt; s->client.suppress_logging = true;
-    pageant_init();
     active = s;
+#ifdef _WIN32
+    if (input->client_only) {
+        /* 原 pageant.c 的客户端操作会调用 agent_query_synchronous。
+         * 它们只在核心线程执行，绝不在 Qt GUI 或兼容窗口中等候。 */
+        keylist_update();
+        return s;
+    }
+#endif
+    pageant_init();
     Plug *plug;
     s->listener = pageant_listener_new(&plug, &s->client);
+#ifdef _WIN32
+    char *endpoint = pa_windows_pipe_name();
+    Socket *socket = new_named_pipe_listener(endpoint, plug);
+#else
+    const char *endpoint = input->socket_path;
     Socket *socket = new_unix_listener(unix_sock_addr(input->socket_path), plug);
+#endif
     const char *error = sk_socket_error(socket);
     pageant_listener_got_socket(s->listener, socket);
-    if (error || chmod(input->socket_path, 0600)) { destroy(s); return NULL; }
+    bool failed = error != NULL;
+#ifdef _WIN32
+    if (!failed) {
+        s->legacy.vt = &legacy_vt; s->legacy.suppress_logging = true;
+        pageant_register_client(&s->legacy); s->registered = true;
+        s->ipc = pa_windows_ipc_start(legacy_request, s);
+        failed = !s->ipc;
+    }
+#else
+    if (!failed) failed = chmod(input->socket_path, 0600) != 0;
+#endif
     pa_packet header = {0}; header.kind = PA_ENDPOINT;
-    if (publish(s, header, input->socket_path, strlen(input->socket_path), 0,
-                PR_EVENT_STATE) != PR_OK) { destroy(s); return NULL; }
+    if (!failed) failed = publish(s, header, endpoint, strlen(endpoint), 0, PR_EVENT_STATE) != PR_OK;
+#ifdef _WIN32
+    sfree(endpoint);
+#endif
+    if (failed) { destroy(s); return NULL; }
     keylist_update();
     return s;
-#endif
 }
 static void add_key(pa_state *s, const char *path, const char *passphrase,
                      bool encrypted, uint64_t operation)
 {
+#ifdef _WIN32
+    wchar_t *wide_path = decode_utf8_to_wide_string(path);
+    Filename *file = filename_from_wstr(wide_path);
+    sfree(wide_path);
+#else
     Filename *file = filename_from_str(path);
+#endif
     char *detail = NULL;
     int status = pageant_add_keyfile(file, passphrase, &detail, encrypted);
     filename_free(file);

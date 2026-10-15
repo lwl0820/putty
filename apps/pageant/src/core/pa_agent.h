@@ -1,6 +1,7 @@
 #ifndef PA_AGENT_H
 #define PA_AGENT_H
 #include "putty_runtime/core.h"
+#include <stdbool.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -8,7 +9,13 @@ extern "C" {
 /* 进程内消息只含定长字段和尾随字节；上游指针及解密材料不出核心线程。 */
 #define PA_MAGIC UINT32_C(0x50414731)
 #define PA_MAX_PUBLIC_BYTES (2u * 1024u * 1024u)
-typedef struct pa_options { char socket_path[108]; } pa_options;
+typedef struct pa_options {
+    char socket_path[108];
+#ifdef _WIN32
+    /* 二次启动仅向现有原版/新版代理添加密钥，不建立另一份密钥库。 */
+    bool client_only;
+#endif
+} pa_options;
 typedef enum pa_action {
     PA_REFRESH = 1, PA_ADD, PA_DELETE, PA_DELETE_ALL,
     PA_REENCRYPT, PA_REENCRYPT_ALL, PA_REPLY

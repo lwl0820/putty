@@ -237,6 +237,21 @@ static pr_status command(void *context, const pr_command *command)
             if (initial != PR_OK || remaining != PR_BACKPRESSURE || oversized != PR_BACKPRESSURE)
                 return PR_PLATFORM_ERROR;
             increment(&oversize_done);
+#ifndef _WINDOWS
+        } else if (command->argument == 8) {
+            if (!module->socket) return PR_NOT_FOUND;
+            sk_set_frozen(module->socket, true);
+            return emit(module, PR_EVENT_STATE, "oob-frozen", 10, 0);
+        } else if (command->argument == 9) {
+            if (!module->socket) return PR_NOT_FOUND;
+            struct pollfd ready = {sk_net_get_fd(module->socket), POLLIN | POLLPRI, 0};
+            /* 仅在前置数据和紧急标记均已到达后解冻，排除发送/读取的调度竞争。 */
+            if (poll(&ready, 1, 0) != 1 ||
+                (ready.revents & (POLLIN | POLLPRI)) != (POLLIN | POLLPRI))
+                return PR_BACKPRESSURE;
+            sk_set_frozen(module->socket, false);
+            return emit(module, PR_EVENT_STATE, "oob-thawed", 10, 0);
+#endif
         }
         return PR_OK;
     default:
@@ -274,6 +289,68 @@ static void destroy(void *context)
 const pr_module runtime_test_module = {create, command, destroy, drained};
 
 #ifndef _WINDOWS
+struct fd_urgent_probe {
+    pr_core *core;
+    pthread_t thread;
+    int fd;
+    bool exceptional;
+};
+static struct fd_urgent_probe *active_urgent_probe;
+static void urgent_probe_emit(struct fd_urgent_probe *probe, pr_event_type type,
+                              const void *data, size_t size)
+{
+    const pr_event event = {.type = type, .data = data, .size = size};
+    assert(pr_core_emit(probe->core, &event) == PR_OK);
+}
+static void urgent_probe_ready(int fd, int flags)
+{
+    struct fd_urgent_probe *probe = active_urgent_probe;
+    assert(probe && fd == probe->fd && pthread_equal(probe->thread, pthread_self()));
+    if (flags == SELECT_X) {
+        char byte;
+        assert(!probe->exceptional && recv(fd, &byte, 1, MSG_OOB) == 1 && byte == '!');
+        probe->exceptional = true;
+        urgent_probe_emit(probe, PR_EVENT_STATE, "exception", 9);
+    } else if (flags == SELECT_R) {
+        char data[32];
+        /* 注册前已同时具备 R/X；首次普通读取必须晚于异常分发。 */
+        assert(probe->exceptional);
+        const ssize_t count = recv(fd, data, sizeof(data), 0);
+        assert(count > 0);
+        urgent_probe_emit(probe, PR_EVENT_DATA, data, (size_t)count);
+    } else {
+        assert(!"测试没有注册写通知");
+    }
+}
+static void *urgent_probe_create(pr_core *core, const void *options, size_t size)
+{
+    assert(size == sizeof(int) && !active_urgent_probe);
+    struct fd_urgent_probe *probe = snew(struct fd_urgent_probe);
+    *probe = (struct fd_urgent_probe){.core = core, .thread = pthread_self()};
+    int fd;
+    memcpy(&fd, options, sizeof(fd));
+    probe->fd = dup(fd);
+    assert(probe->fd >= 0);
+    nonblock(probe->fd);
+    active_urgent_probe = probe;
+    uxsel_set(probe->fd, SELECT_R | SELECT_X, urgent_probe_ready);
+    return probe;
+}
+static pr_status urgent_probe_command(void *context, const pr_command *command)
+{ (void)context; (void)command; return PR_ARGUMENT; }
+static void urgent_probe_destroy(void *context)
+{
+    struct fd_urgent_probe *probe = context;
+    assert(probe == active_urgent_probe && pthread_equal(probe->thread, pthread_self()));
+    uxsel_del(probe->fd);
+    close(probe->fd);
+    active_urgent_probe = NULL;
+    sfree(probe);
+}
+const pr_module runtime_test_urgent_module = {
+    urgent_probe_create, urgent_probe_command, urgent_probe_destroy, NULL
+};
+
 struct fd_close_probe {
     pr_core *core;
     pthread_t thread;

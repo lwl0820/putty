@@ -12,6 +12,15 @@ Filename *platform_default_filename(const char *name)
 char *platform_get_x_display(void) { return dupstr(getenv("DISPLAY")); }
 #endif
 
+Filename *pt_filename_from_utf8(const char *path)
+{
+#ifdef _WINDOWS
+    return filename_from_utf8(path);
+#else
+    return filename_from_str(path);
+#endif
+}
+
 void pt_init_unicode(Conf *conf, struct unicode_data *unicode)
 {
 #ifdef _WINDOWS

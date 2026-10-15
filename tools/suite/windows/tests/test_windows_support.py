@@ -14,7 +14,7 @@ sys.path.insert(0, str(SUITE_WINDOWS))
 from support import (CHECKS, TEMPORARY_ROOT, ValidationError, audit_link_map,
                      decode_native_report, native_environment, project_path)  # noqa: E402
 from check_build import assertions, assertions_enabled, installation  # noqa: E402
-from run_ctest import TERMINAL_EXPECTED, inspect_results, validate_selection  # noqa: E402
+from run_ctest import PAGEANT_EXPECTED, TERMINAL_EXPECTED, inspect_results, validate_selection  # noqa: E402
 from run_native_test import run  # noqa: E402
 
 
@@ -195,6 +195,39 @@ class WindowsContractTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(any("\u4e00" <= character <= "\u9fff"
                                 for character in result.stdout.decode("utf-8")))
+
+    def test_pageant_requires_exact_registration_and_actual_results(self):
+        path = self.root / "pageant-results.xml"
+        tests = [{"name": name} for name in sorted(PAGEANT_EXPECTED)]
+        validate_selection({"tests": tests}, PAGEANT_EXPECTED)
+        for changed in ([], tests[:-1], tests + tests[:1]):
+            with self.subTest(changed=changed), self.assertRaises(ValidationError):
+                validate_selection({"tests": changed}, PAGEANT_EXPECTED)
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        cases = ['<testcase name="' + name + '"/>' for name in sorted(PAGEANT_EXPECTED)]
+
+        def write(pageant):
+            path.write_text('<testsuite>' + native + pageant + '</testsuite>', encoding="utf-8")
+
+        write(''.join(cases))
+        report = inspect_results(path, require_pageant=True)
+        self.assertEqual(report["pageant_private_ipc"], "passed")
+        self.assertIn("pageant-original-name-cross-version", report["unverified"])
+        self.assertIn("pageant-cross-integrity-owner-acl", report["unverified"])
+        for changed in ('', ''.join(cases[:-1]), ''.join(cases + cases[:1])):
+            write(changed)
+            with self.subTest(changed=changed), self.assertRaises(ValidationError):
+                inspect_results(path, require_pageant=True)
+        for name in sorted(PAGEANT_EXPECTED):
+            others = ''.join(case for case in cases if case != '<testcase name="' + name + '"/>')
+            for tag in ("skipped", "failure", "error"):
+                write(others + '<testcase name="' + name + '"><' + tag + '/></testcase>')
+                with self.subTest(name=name, tag=tag), self.assertRaises(ValidationError):
+                    inspect_results(path, require_pageant=True)
+            for status in ("notrun", "disabled", "skipped"):
+                write(others + '<testcase name="' + name + '" status="' + status + '"/>')
+                with self.subTest(name=name, status=status), self.assertRaises(ValidationError):
+                    inspect_results(path, require_pageant=True)
 
     def test_hive_requirement_rejects_missing_duplicate_skipped_and_failed(self):
         path = self.root / "hive-results.xml"

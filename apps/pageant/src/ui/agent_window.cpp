@@ -148,7 +148,11 @@ void AgentWindow::translate()
     zh_->setChecked(!language_->english()); en_->setChecked(language_->english());
     table_->setHorizontalHeaderLabels({t("类型", "Type"), t("指纹", "Fingerprint"),
                                       t("注释", "Comment"), t("状态", "State")});
+#ifdef Q_OS_WIN
+    socketLabel_->setText(t("代理地址（Windows 命名管道）", "Agent address (Windows named pipe)"));
+#else
     socketLabel_->setText(t("代理地址（SSH_AUTH_SOCK）", "Agent address (SSH_AUTH_SOCK)"));
+#endif
     tray_->setToolTip(windowTitle());
     if (dialog_) {
         dialog_->setWindowTitle(t("密钥口令", "Key passphrase"));

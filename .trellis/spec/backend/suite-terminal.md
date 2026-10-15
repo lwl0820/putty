@@ -16,6 +16,8 @@ void TerminalController::close();
 
 `pt_terminal.h` 是自有 C 边界。`pt_options` 仅在进程内携带固定绘制入口，不能持久化；`pt_connection` 携带固定容量的 UTF-8 字段。`pt_packet` 包含 magic、type、render_generation、尺寸／状态参数、length 和 revision，尾随恰好 length 字节。跨线程消息不含 Terminal、Conf、Backend、QFont 或私钥对象。
 
+密钥路径经 `pt_filename_from_utf8` 转为正式 Filename：Windows 使用上游 `filename_from_utf8`，Unix 保留原路径字节构造。不能把 Qt 的 UTF-8 路径交给 Windows 按 ANSI 代码页解释的 `filename_from_str`。原生平台用例核对中文及空格路径的宽字符结果，真实认证另用同类路径读出实际 PPK。
+
 ## 3. 所有权、顺序和容量
 
 - 唯一核心线程拥有 Terminal、Ldisc、Backend、Conf、客户端 PRNG、QFont 和可写 QImage。GUI 只消费独立完整帧与公开状态；禁止同步调用 GUI 字宽或等待 GUI 返回。

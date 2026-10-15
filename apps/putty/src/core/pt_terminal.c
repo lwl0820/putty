@@ -410,7 +410,7 @@ static pr_status open_connection(pt_session *s, const pr_command *command)
     conf_set_str(s->conf, CONF_remote_cmd, c->command);
     conf_set_bool(s->conf, CONF_nopty, !c->request_pty);
     conf_set_bool(s->conf, CONF_tryagent, false);
-    Filename *key = filename_from_str(c->keyfile);
+    Filename *key = pt_filename_from_utf8(c->keyfile);
     conf_set_filename(s->conf, CONF_keyfile, key); filename_free(key);
     term_set_trust_status(s->terminal, true);
     char *realhost = NULL;

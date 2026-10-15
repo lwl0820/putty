@@ -39,6 +39,8 @@ Windows 网络保留原版 `WSAAsyncSelect`、隐藏窗口、`winselgui_response
 
 `runtime-lifecycle` 覆盖真实双向 TCP、背压恢复、OOB、断开重开、一次性请求、回调/计时取消、析构新增回调、异步关闭和槽内删除；超额事件用不可读内存探针证明拒绝发生在读取前。
 
+Unix 内联 OOB 的 `urgent=1` 标记紧急位置之前的数据，不是紧急字节本身。测试须分别控制前置数据已经读空和仍待处理两种状态；不能无条件以该标记判断紧急字节是否送达。异常先于读取的契约另用真实 TCP 同时 R／PRI 就绪、非内联 `MSG_OOB` 字节及普通流精确比较验证。
+
 `runtime-handle-registration` 在 Linux 以窄平台类型 shim 编译真实 Windows 等待算法，覆盖旧快照、同值复用和回调中注销。它不能替代 Windows 原生通知测试。`runtime-core-link` 与 `runtime-agent-core-link` 分别验证完整客户端及代理的实际链接闭包和初始化。
 
 运行测试前使用项目 `.tmp/` 隔离原版存储、种子、临时路径与代理环境；没有逐进程 HKCU 隔离的 Windows runner 明确跳过，不能修改个人注册表来获得通过。没有对应依赖或平台的跳过必须列入报告。

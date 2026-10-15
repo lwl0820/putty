@@ -9,6 +9,11 @@ void random_add_noise(NoiseSourceId source, const void *noise, int length)
 { (void)source; (void)noise; (void)length; }
 void random_save_seed(void) { }
 void random_destroy_seed(void) { }
+#ifdef _WINDOWS
+/* 固定原版 windows/pageant.c 明确不使用 PRNG，不能抽入客户端 noise.c。 */
+void noise_ultralight(NoiseSourceId source, unsigned long value)
+{ (void)source; (void)value; }
+#else
 char *platform_default_s(const char *name) { (void)name; return NULL; }
 bool platform_default_b(const char *name, bool value) { (void)name; return value; }
 int platform_default_i(const char *name, int value) { (void)name; return value; }
@@ -19,6 +24,7 @@ Filename *platform_default_filename(const char *name)
 char *(*pa_x_display_hook)(void);
 char *platform_get_x_display(void)
 { return pa_x_display_hook ? pa_x_display_hook() : NULL; }
+#endif
 void (*pa_old_keyfile_warning_hook)(void);
 void old_keyfile_warning(void)
 { if (pa_old_keyfile_warning_hook) pa_old_keyfile_warning_hook(); }

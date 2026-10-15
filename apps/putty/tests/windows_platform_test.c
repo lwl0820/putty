@@ -1,9 +1,20 @@
 #include "core/pt_platform.h"
+#include <stdarg.h>
 #include <stdio.h>
 
 #define CHECK(value) do { if (!(value)) { \
     fprintf(stderr, "Windows 终端平台回归失败，第 %d 行：%s\n", __LINE__, #value); \
     return 1; } } while (0)
+
+/* 独立测试宿主的分配失败必须立即终止，不引入产品 GUI 或存储。 */
+void modalfatalbox(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    abort();
+}
 
 /* 用不同于 CP437 的 OEM 表检查适配层，不受 CI 系统区域设置影响。 */
 static int probe_mode;
@@ -21,10 +32,12 @@ static void init_unicode_probe(Conf *conf, struct unicode_data *unicode)
     }
 }
 #define pt_init_unicode pt_init_unicode_probe
+#define pt_filename_from_utf8 pt_filename_from_utf8_probe
 #define init_ucs_generic init_unicode_probe
 #include "../src/core/pt_platform.c"
 #undef init_ucs_generic
 #undef pt_init_unicode
+#undef pt_filename_from_utf8
 
 static int check_oem_modes(void)
 {
@@ -54,6 +67,9 @@ static int check_oem_modes(void)
 int main(void)
 {
     CHECK(check_oem_modes() == 0);
+    Filename *utf8_key = pt_filename_from_utf8("文件 密钥.ppk");
+    CHECK(!wcscmp(filename_to_wstr(utf8_key), L"文件 密钥.ppk"));
+    filename_free(utf8_key);
     /* 只创建所需的显式配置字段，禁止通过 do_defaults 读取注册表。 */
     Conf *conf = conf_new();
     conf_set_str(conf, CONF_line_codepage, "UTF-8");

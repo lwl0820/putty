@@ -15,7 +15,10 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #else
+#include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #endif
 using namespace putty_runtime;
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
@@ -54,6 +57,79 @@ static bool state(const std::vector<Event> &events, const QByteArray &text)
         if (event.type == PR_EVENT_STATE && event.data == text) return true;
     return false;
 }
+#ifndef Q_OS_WIN
+static void thawWithPendingUrgent(Runtime &runtime, std::vector<Event> &events)
+{
+    QElapsedTimer deadline;
+    deadline.start();
+    uint64_t request = 900;
+    while (!state(events, "oob-thawed") && deadline.elapsed() < 5000) {
+        auto thaw = command(runtime, PR_COMMAND_CUSTOM, 9);
+        thaw.request = ++request;
+        CHECK(runtime.submit(thaw) == PR_OK);
+        pr_status status = PR_BUSY;
+        CHECK(until([&] {
+            for (const auto &event : events)
+                if (event.type == PR_EVENT_COMPLETED && event.request == request) {
+                    status = event.status;
+                    return true;
+                }
+            return false;
+        }));
+        CHECK(status == PR_OK || status == PR_BACKPRESSURE);
+    }
+    CHECK(state(events, "oob-thawed"));
+}
+static void simultaneousUrgentReadiness()
+{
+    struct Descriptor {
+        int fd = -1;
+        ~Descriptor() { if (fd >= 0) ::close(fd); }
+    } listener, sender, receiver;
+    listener.fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(listener.fd >= 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    CHECK(::bind(listener.fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0);
+    CHECK(::listen(listener.fd, 1) == 0);
+    socklen_t length = sizeof(address);
+    CHECK(::getsockname(listener.fd, reinterpret_cast<sockaddr *>(&address), &length) == 0);
+    sender.fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(sender.fd >= 0);
+    CHECK(::connect(sender.fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0);
+    receiver.fd = ::accept(listener.fd, nullptr, nullptr);
+    CHECK(receiver.fd >= 0);
+    CHECK(::send(sender.fd, "before", 6, 0) == 6);
+    CHECK(::send(sender.fd, "!", 1, MSG_OOB) == 1);
+    CHECK(::send(sender.fd, "after", 5, 0) == 5);
+    /* 在 Qt 注册通知之前，证明同一真实 TCP socket 的 R/X 已同时就绪。 */
+    pollfd ready{receiver.fd, POLLIN | POLLPRI, 0};
+    CHECK(until([&] {
+        CHECK(::poll(&ready, 1, 0) >= 0);
+        return (ready.revents & (POLLIN | POLLPRI)) == (POLLIN | POLLPRI);
+    }));
+    const QByteArray options(reinterpret_cast<const char *>(&receiver.fd), sizeof(receiver.fd));
+    Runtime runtime(runtime_test_urgent_module, options);
+    std::vector<Event> events;
+    waitReady(runtime, events);
+    QByteArray received;
+    CHECK(until([&] {
+        received.clear();
+        for (const auto &event : events)
+            if (event.type == PR_EVENT_DATA) received.append(event.data);
+        return received == "beforeafter" && state(events, "exception");
+    }));
+    unsigned exceptions = 0;
+    for (const auto &event : events) {
+        CHECK(event.type != PR_EVENT_ERROR);
+        if (event.type == PR_EVENT_STATE && event.data == "exception") ++exceptions;
+    }
+    CHECK(exceptions == 1);
+    runtime.close();
+    CHECK(until([&] { return runtime.isClosed(); }));
+}
+#endif
 static void lifecycle()
 {
     std::vector<Event> events;
@@ -195,9 +271,22 @@ static void network()
     received.clear();
     CHECK(peers.front()->write("before", 6) == 6);
     peers.front()->flush();
+    CHECK(until([&] { return received == "before"; }));
     CHECK(::send(int(peers.front()->socketDescriptor()), "!", 1, MSG_OOB) == 1);
     CHECK(peers.front()->write("after", 5) == 5);
     peers.front()->flush();
+    CHECK(until([&] { return received == "before!after"; }));
+    /* 前置数据已读空时，内联紧急字节本身按普通数据交付，不产生 urgent=1。 */
+    CHECK(!state(events, "urgent"));
+    received.clear();
+    CHECK(runtime.submit(command(runtime, PR_COMMAND_CUSTOM, 8)) == PR_OK);
+    CHECK(until([&] { return state(events, "oob-frozen"); }));
+    CHECK(peers.front()->write("before", 6) == 6);
+    peers.front()->flush();
+    CHECK(::send(int(peers.front()->socketDescriptor()), "!", 1, MSG_OOB) == 1);
+    CHECK(peers.front()->write("after", 5) == 5);
+    peers.front()->flush();
+    thawWithPendingUrgent(runtime, events);
     CHECK(until([&] { return received == "before!after" && state(events, "urgent"); }));
 #endif
     CHECK(runtime.submit(command(runtime, PR_COMMAND_CLOSE_OBJECT)) == PR_OK);
@@ -282,6 +371,7 @@ int main(int argc, char **argv)
         lifecycle();
 #ifndef Q_OS_WIN
         CHECK(runtime_test_fd_close());
+        simultaneousUrgentReadiness();
 #endif
         eventCopyLimit();
         network();

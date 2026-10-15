@@ -11,6 +11,7 @@ unsigned runtime_test_late_callbacks(void);
 unsigned runtime_test_cancelled(void);
 unsigned runtime_test_thread_errors(void);
 #ifndef _WIN32
+extern const pr_module runtime_test_urgent_module;
 int runtime_test_fd_close(void);
 #endif
 #ifdef __cplusplus

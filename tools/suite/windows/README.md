@@ -1,6 +1,6 @@
 # Windows CI 与受控测试宿主
 
-本目录由独立工作流 `.github/workflows/putty-suite.yml` 使用，沿用 MSVC 2022 x64、Qt 6.8.3、CMake 3.30.9、Ninja 1.11.1.1。它接共享运行时、终端和三个 CLI 的构建，以及三个 CLI 的安装；终端四项无存储原生测试已经接线，真实认证与 Pageant 产品验收仍待接入，不修改原 PuTTYgen 工作流。
+本目录由独立工作流 `.github/workflows/putty-suite.yml` 使用，沿用 MSVC 2022 x64、Qt 6.8.3、CMake 3.30.9、Ninja 1.11.1.1。它接共享运行时、两个 GUI 和三个 CLI 的构建，以及三个 CLI 的按组件安装；终端四项无存储原生测试及 Pageant 私有 IPC 宿主已经接线，真实 SSH／PPK、原名跨版本和完整产品验收仍待补齐，不修改原 PuTTYgen 工作流。
 
 ## 执行与结果
 
@@ -8,15 +8,17 @@
 
 ```powershell
 python -B -m unittest discover -s tools/suite/windows/tests -v
-cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
+cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PAGEANT=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
 cmake --build .tmp/build/windows-release --parallel 4
 $env:PATH = "$PWD/.tmp/qt/bin;$env:PATH"
-python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage --require-terminal
+python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage --require-terminal --require-pageant
 ```
 
 每个命令失败应停止；工作流逐条检查退出码。`run_ctest.py` 先要求恰好注册 `runtime-windows-handles`、`runtime-windows-events`，再执行 CTest 并核实 JUnit 中这两个用例存在、未跳过、未失败。`--require-hive` 另要求唯一私有 hive 探针；`--require-storage` 必须同时指定前者，并要求唯一受控上游存储用例。零测试、重复、失败和跳过均不能满足相应要求。执行前删除旧 JUnit，避免误收历史结果。其它 CTest 的实际跳过名称单独列入 JSON；现有 `runtime-lifecycle` 尚未接入受控种子变体，仍返回 77。
 
 `--require-terminal` 另要求 `windows-terminal` 标签恰好注册并实际通过 `terminal-cpu-render`、`terminal-windows-platform`、`terminal-gss-mic-failures`、`terminal-sspi-mic-failures-shim` 四项。完整构建也编译 `putty-qt` 和原 `putty-terminal-tests`，但本轮不运行后者的存储／认证路径。四项成功不能替代真实 SSH／加密 PPK、原生 SSPI 或桌面交互；报告保留这些未验标签。
+
+`--require-pageant` 要求 `windows-pageant` 标签恰有 `pageant-windows-ipc` 与 `pageant-windows-runner-contract`，两项均须在 JUnit 实际成功。IPC runner 自行要求15项原生检查完整且唯一，审计随机编译命名空间与持久化拒绝链接图，并产出独立 `pageant-ipc.json`。契约脚本本身不算原生 IPC 证据；原名新旧版本、跨权限及 OpenSSH 认证继续单列未验。
 
 | 宿主 | 实际调用路径及检查 |
 | --- | --- |
@@ -37,8 +39,8 @@ Release 链接显式保留四个拒绝入口。运行器先审查 MSVC map，要
 
 ## 构建与报告
 
-工作流先在禁用 Qt 查找时执行全关闭和 PSFTP-only 多配置构建；仅有 Debug 时 Release 安装必须失败。随后核对 Debug/Release 安装清单、配置对应的二进制摘要。完整 Release 构建包含共享核心、终端和三个 CLI；`check_build.py` 核对实际核心编译命令、CLI 缓存及 Ninja 生成的编译命令仍启用断言，并要求安装文件集合恰好为选定的 CLI。
+工作流先在禁用 Qt 查找时执行全关闭和 PSFTP-only 多配置构建；仅有 Debug 时 Release 安装必须失败。随后核对 Debug/Release 安装清单、配置对应的二进制摘要。完整 Release 构建包含共享核心、两个 GUI 和三个 CLI；`check_build.py` 核对实际核心编译命令、CLI 缓存及 Ninja 生成的编译命令仍启用断言，并要求安装文件集合恰好为选定的 CLI。
 
-只上传 `.tmp/windows-ci/reports/` 下明确的 JSON/XML、`private-hive.json`、`private-storage.json`、具名测试宿主 EXE 和三个安装 CLI EXE。没有上传整个 `.tmp/`、运行私有根、Qt/pip cache、密钥或 hive 树。事件 EXE 需要匹配 Qt DLL，属于测试程序，不是已完成部署的用户交付包。
+三个 CLI 用各自安装组件放入专用前缀，不将 Pageant 混入 CLI 清单；本轮未验证两个 GUI 的部署包。只上传 `.tmp/windows-ci/reports/` 下明确的 JSON/XML、`private-hive.json`、`private-storage.json`、具名测试宿主（含 Pageant IPC）EXE 和三个安装 CLI EXE。没有上传整个 `.tmp/`、运行私有根、Qt/pip cache、密钥或 hive 树。事件 EXE 需要匹配 Qt DLL，属于测试程序，不是已完成部署的用户交付包。
 
 Windows Server 2022／MSVC19.44／Qt6.8.3 的事件、HANDLE 和 hive 探针已在 [69e7607 对应 CI](https://github.com/lwl0820/putty/actions/runs/38664741693) 实际成功；存储变体和新增 GUI 接线结果分别记录，不能继承旧成功。Windows 10 1809+/11 的字体/DPI、输入法、剪贴板、托盘、窗口和权限交互由用户人工验收，结果另记。

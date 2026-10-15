@@ -1,8 +1,0 @@
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core)
-add_library(putty-runtime STATIC src/core.c src/runtime.cpp include/putty_runtime/runtime.h)
-set_target_properties(putty-runtime PROPERTIES AUTOMOC ON C_STANDARD 99 CXX_STANDARD 17)
-target_include_directories(putty-runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(putty-runtime PUBLIC Qt6::Core PRIVATE suite-putty)
-if(BUILD_TESTING)
-    add_subdirectory(tests)
-endif()

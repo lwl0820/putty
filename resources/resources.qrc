@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/i18n"><file alias="zh_CN.json">i18n/zh_CN.json</file></qresource>
+  <qresource prefix="/help"><file alias="zh_CN.html">help/zh_CN.html</file><file alias="en.html">help/en.html</file></qresource>
+  <qresource prefix="/licences"><file alias="putty.txt">../vendor/putty/LICENCE</file></qresource>
+  <qresource prefix="/icons"><file alias="puttygen-gui.png">icons/puttygen-gui.png</file></qresource>
+</RCC>

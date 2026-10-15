@@ -6,7 +6,6 @@
 
 阅读 [directory-structure.md](directory-structure.md) 和 [state-management.md](state-management.md)，再读取当前任务 PRD、设计和研究。其余文件尚为初始化模板，不套用 Web 或数据库约束。
 
-终端前端另读 [终端跨层契约](../backend/suite-terminal.md)；文本和方向键须共用有序队列，帧消费者必须遵守生产者的总像素限额。
 
 ## 质量检查
 

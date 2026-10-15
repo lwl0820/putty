@@ -100,8 +100,8 @@ Ubuntu DEB 冒烟在 root 容器中运行，宿主 Actions runner 以普通用�
 ### 2. 命令
 
 ```bash
-python apps/puttygen/packaging/collect_smoke_reports.py
-python -B -m unittest discover -s apps/puttygen/packaging/tests -v
+python packaging/collect_smoke_reports.py
+python -B -m unittest discover -s packaging/tests -v
 ```
 
 收集器默认从 `.tmp/package-smoke` 读取，写入 `.tmp/package-smoke-reports`，可通过 `--source`、`--destination` 指定测试目录；两路径解析后必须位于项目 `.tmp/` 内，且不能相同或互相包含，非法参数返回非零。

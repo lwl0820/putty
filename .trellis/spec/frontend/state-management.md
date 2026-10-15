@@ -2,7 +2,7 @@
 
 ## 1. 范围与触发
 
-适用于 `apps/puttygen/src/app/session_controller.*`、`apps/puttygen/src/ui/main_window.*` 与语言管理。生成、加载、保存、证书操作和对象销毁跨 GUI／工作线程时必须遵守本契约；所有产品文字只说明用户操作，不展示任务或实施说明。
+适用于 `src/app/session_controller.*`、`src/ui/main_window.*` 与语言管理。生成、加载、保存、证书操作和对象销毁跨 GUI／工作线程时必须遵守本契约；所有产品文字只说明用户操作，不展示任务或实施说明。
 
 ## 2. 接口签名
 

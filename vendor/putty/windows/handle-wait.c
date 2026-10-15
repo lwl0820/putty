@@ -37,11 +37,11 @@ struct HandleWait {
     void *callback_ctx;
 
     int index;                    /* sort key for tree234 */
-    uint64_t registration;
 };
 
 struct HandleWaitListInner {
-    int indices[MAXIMUM_WAIT_OBJECTS];
+    HandleWait *hws[MAXIMUM_WAIT_OBJECTS];
+    HANDLE handles[MAXIMUM_WAIT_OBJECTS];
 
     struct HandleWaitList hwl;
 };
@@ -57,7 +57,6 @@ static int handlewait_cmp(void *av, void *bv)
 }
 
 static tree234 *handlewaits_tree_real;
-static uint64_t next_registration;
 
 static inline tree234 *ensure_handlewaits_tree_exists(void)
 {
@@ -93,9 +92,6 @@ HandleWait *add_handle_wait(HANDLE h, handle_wait_callback_fn_t callback,
     hw->handle = h;
     hw->callback = callback;
     hw->callback_ctx = callback_ctx;
-    /* 注册身份在进程内不复用；不能以 HANDLE 值或堆地址标识旧通知。 */
-    assert(next_registration != UINT64_MAX);
-    hw->registration = ++next_registration;
 
     tree234 *t = ensure_handlewaits_tree_exists();
     hw->index = allocate_index();
@@ -121,9 +117,8 @@ HandleWaitList *get_handle_wait_list(void)
     HandleWait *hw;
     for (int i = 0; (hw = index234(t, i)) != NULL; i++) {
         assert(n < MAXIMUM_WAIT_OBJECTS);
-        hwli->indices[n] = hw->index;
+        hwli->hws[n] = hw;
         hwli->hwl.handles[n] = hw->handle;
-        hwli->hwl.registrations[n] = hw->registration;
         n++;
     }
     hwli->hwl.nhandles = n;
@@ -136,13 +131,7 @@ void handle_wait_activate(HandleWaitList *hwl, int index)
         container_of(hwl, struct HandleWaitListInner, hwl);
     assert(0 <= index);
     assert(index < hwli->hwl.nhandles);
-    /* 快照可在撤销后迟到，先按索引查当前注册，再核对不可复用身份。 */
-    HandleWait key;
-    key.index = hwli->indices[index];
-    HandleWait *hw = find234(ensure_handlewaits_tree_exists(), &key, NULL);
-    if (!hw || hw->registration != hwl->registrations[index])
-        return;
-    assert(hw->handle == hwl->handles[index]);
+    HandleWait *hw = hwli->hws[index];
     hw->callback(hw->callback_ctx);
 }
 

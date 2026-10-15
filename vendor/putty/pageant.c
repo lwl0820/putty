@@ -246,8 +246,6 @@ static void pk_priv_free(PageantPrivateKey *priv)
 
 static void pk_pub_free(PageantPublicKey *pub)
 {
-    if (pub->base_pub)
-        strbuf_free(pub->base_pub);
     if (pub->full_pub)
         strbuf_free(pub->full_pub);
     sfree(pub->comment);
@@ -780,23 +778,6 @@ static void fail_requests_for_key(PageantPrivateKey *priv, const char *reason)
         strbuf_free(sb);
         pageant_async_op_unlink_and_free(&so->pao);
     }
-    /* 等待其它密钥提示结束的签名也持有 priv，删除时须一起取消。
-     * unlink_and_free 同时撤销已经排队的恢复回调。 */
-    PageantKeyRequestNode *pkr = requests_blocked_on_gui.next;
-    while (pkr != &requests_blocked_on_gui) {
-        PageantSignOp *so = container_of(pkr, PageantSignOp, pkr);
-        pkr = pkr->next;
-        if (so->priv != priv)
-            continue;
-        signop_unlink(so);
-        strbuf *sb = strbuf_new();
-        failure(so->pao.info->pc, so->pao.reqid, sb, so->failure_type,
-                "%s", reason);
-        pageant_client_got_response(so->pao.info->pc, so->pao.reqid,
-                                    ptrlen_from_strbuf(sb));
-        strbuf_free(sb);
-        pageant_async_op_unlink_and_free(&so->pao);
-    }
 }
 
 static void unblock_requests_for_key(PageantPrivateKey *priv)
@@ -828,7 +809,6 @@ void pageant_passphrase_request_success(PageantClientDialogId *dlgid,
 
     if (priv->moribund) {
         pk_priv_free(priv);
-        unblock_pending_gui_requests();
         return;
     }
 
@@ -845,7 +825,6 @@ void pageant_passphrase_request_success(PageantClientDialogId *dlgid,
 
         if (!skey) {
             fail_requests_for_key(priv, "unable to decrypt key");
-            unblock_pending_gui_requests();
             return;
         } else if (skey == SSH2_WRONG_PASSPHRASE) {
             /*
@@ -859,7 +838,6 @@ void pageant_passphrase_request_success(PageantClientDialogId *dlgid,
                  * this point, we need not bother putting up a request
                  * at all any more.
                  */
-                unblock_pending_gui_requests();
                 return;
             }
 
@@ -870,7 +848,6 @@ void pageant_passphrase_request_success(PageantClientDialogId *dlgid,
             if (!request_passphrase(so->pao.info->pc, so->priv)) {
                 fail_requests_for_key(priv, "unable to continue creating "
                                       "passphrase prompts");
-                unblock_pending_gui_requests();
             }
             return;
         } else {
@@ -895,9 +872,6 @@ void pageant_passphrase_request_refused(PageantClientDialogId *dlgid)
     priv->decryption_prompt_active = false;
 
     fail_requests_for_key(priv, "user refused to supply passphrase");
-
-    if (priv->moribund)
-        pk_priv_free(priv);
 
     unblock_pending_gui_requests();
 }
@@ -1212,7 +1186,7 @@ static PageantAsyncOp *pageant_make_op(
             keylist_update();
             put_byte(sb, SSH_AGENT_SUCCESS);
             pageant_client_log(pc, reqid, "reply: SSH_AGENT_SUCCESS");
-            /* pageant_add_ssh1_key 已复制，临时输入仍由下方清理。 */
+            key = NULL;            /* don't free it in cleanup */
         } else {
             fail("key already present");
         }
@@ -1273,7 +1247,7 @@ static PageantAsyncOp *pageant_make_op(
 
             pageant_client_log(pc, reqid, "reply: SSH_AGENT_SUCCESS");
 
-            /* pageant_add_ssh2_key 已复制，临时输入仍由下方清理。 */
+            key = NULL;            /* don't clean it up */
         } else {
             fail("key already present");
         }
@@ -1493,8 +1467,6 @@ static PageantAsyncOp *pageant_make_op(
                                        " (loaded unencrypted PPK)");
                 } else {
                     fail("key already present");
-                }
-                if (skey) {
                     if (skey->key)
                         ssh_key_free(skey->key);
                     if (skey->comment)
@@ -1751,8 +1723,6 @@ struct pageant_conn_queued_response {
 };
 
 struct pageant_conn_state {
-    /* 仅跟踪生命周期，消息解析和回复顺序仍由原连接实现管理。 */
-    struct pageant_conn_state *owner_next, **owner_prev;
     Socket *connsock;
     PageantListenerClient *plc;
     unsigned char lenbuf[4], pktbuf[AGENT_MAX_MSGLEN];
@@ -1781,19 +1751,6 @@ static void pageant_conn_closing(Plug *plug, PlugCloseType type,
                                     pc->conn_index);
     sk_close(pc->connsock);
     pageant_unregister_client(&pc->pc);
-    while (pc->response_queue.next != &pc->response_queue) {
-        struct pageant_conn_queued_response *qr = pc->response_queue.next;
-        qr->next->prev = qr->prev;
-        qr->prev->next = qr->next;
-        if (qr->sb)
-            strbuf_free(qr->sb);
-        sfree(qr);
-    }
-    if (pc->owner_prev) {
-        *pc->owner_prev = pc->owner_next;
-        if (pc->owner_next)
-            pc->owner_next->owner_prev = pc->owner_prev;
-    }
     sfree(pc);
 }
 
@@ -1921,7 +1878,6 @@ static void pageant_conn_receive(
 }
 
 struct pageant_listen_state {
-    struct pageant_conn_state *connections;
     Socket *listensock;
     PageantListenerClient *plc;
     size_t conn_index;     /* for indexing connections in log messages */
@@ -1958,8 +1914,6 @@ static int pageant_listen_accepting(Plug *plug,
     SocketEndpointInfo *peerinfo;
 
     pc = snew(struct pageant_conn_state);
-    pc->owner_next = NULL;
-    pc->owner_prev = NULL;
     pc->plug.vt = &pageant_connection_plugvt;
     pc->pc.vt = &pageant_connection_clientvt;
     pc->plc = pl->plc;
@@ -1990,12 +1944,6 @@ static int pageant_listen_accepting(Plug *plug,
 
     pageant_register_client(&pc->pc);
 
-    pc->owner_next = pl->connections;
-    pc->owner_prev = &pl->connections;
-    if (pc->owner_next)
-        pc->owner_next->owner_prev = &pc->owner_next;
-    pl->connections = pc;
-
     return 0;
 }
 
@@ -2013,7 +1961,6 @@ struct pageant_listen_state *pageant_listener_new(
     pl->plc = plc;
     pl->listensock = NULL;
     pl->conn_index = 0;
-    pl->connections = NULL;
     *plug = &pl->plug;
     return pl;
 }
@@ -2027,25 +1974,7 @@ void pageant_listener_free(struct pageant_listen_state *pl)
 {
     if (pl->listensock)
         sk_close(pl->listensock);
-    /* 保留原 free 的语义：未显式关闭的连接继续运行，但不能引用本链表。 */
-    while (pl->connections) {
-        struct pageant_conn_state *pc = pl->connections;
-        pl->connections = pc->owner_next;
-        pc->owner_next = NULL;
-        pc->owner_prev = NULL;
-    }
     sfree(pl);
-}
-
-void pageant_listener_shutdown_connections(struct pageant_listen_state *pl)
-{
-    /* 先停止接受新连接，再走统一关闭路径以取消客户端请求并释放回复队列。 */
-    if (pl->listensock) {
-        sk_close(pl->listensock);
-        pl->listensock = NULL;
-    }
-    while (pl->connections)
-        pageant_conn_closing(&pl->connections->plug, PLUGCLOSE_NORMAL, NULL);
 }
 
 /* ----------------------------------------------------------------------

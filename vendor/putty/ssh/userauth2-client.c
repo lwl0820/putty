@@ -1000,10 +1000,6 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
 
                 ppl_logevent("Trying gssapi-keyex...");
                 s->pktout = ssh2_userauth_gss_packet(s, "gssapi-keyex");
-                if (!s->pktout) {
-                    ssh_sw_abort(s->ppl.ssh, "GSSAPI MIC generation failed");
-                    return;
-                }
                 pq_push(s->ppl.out_pq, s->pktout);
                 s->shgss->lib->release_cred(s->shgss->lib, &s->shgss->ctx);
                 s->shgss->ctx = NULL;
@@ -1516,10 +1512,6 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 /* Now send the MIC */
 
                 s->pktout = ssh2_userauth_gss_packet(s, "gssapi-with-mic");
-                if (!s->pktout) {
-                    ssh_sw_abort(s->ppl.ssh, "GSSAPI MIC generation failed");
-                    return;
-                }
                 pq_push(s->ppl.out_pq, s->pktout);
 
                 s->shgss->lib->release_cred(s->shgss->lib, &s->shgss->ctx);
@@ -2554,7 +2546,7 @@ static PktOut *ssh2_userauth_gss_packet(
     strbuf *sb;
     PktOut *p;
     Ssh_gss_buf buf;
-    Ssh_gss_buf mic = {0};
+    Ssh_gss_buf mic;
 
     /*
      * The mic is computed over the session id + intended
@@ -2570,15 +2562,8 @@ static PktOut *ssh2_userauth_gss_packet(
     /* Compute the mic */
     buf.value = sb->s;
     buf.length = sb->len;
-    Ssh_gss_stat status = s->shgss->lib->get_mic(
-        s->shgss->lib, s->shgss->ctx, &buf, &mic);
+    s->shgss->lib->get_mic(s->shgss->lib, s->shgss->ctx, &buf, &mic);
     strbuf_free(sb);
-    /* 库调用失败可能不写输出；不能发送空包或读取未初始化缓冲。 */
-    if (status != SSH_GSS_OK || !mic.value || !mic.length) {
-        if (mic.value)
-            s->shgss->lib->free_mic(s->shgss->lib, &mic);
-        return NULL;
-    }
 
     /* Now we can build the real packet */
     if (strcmp(authtype, "gssapi-with-mic") == 0) {
@@ -2590,8 +2575,6 @@ static PktOut *ssh2_userauth_gss_packet(
         put_stringz(p, authtype);
     }
     put_string(p, mic.value, mic.length);
-    /* 数据已复制进 SSH 包，立即归还 GSS／SSPI 库拥有的 MIC 缓冲。 */
-    s->shgss->lib->free_mic(s->shgss->lib, &mic);
 
     return p;
 }

@@ -1,0 +1,31 @@
+# build_arch.py 从当前提交生成源码归档并填充版本与校验；不要直接跳过校验构建。
+pkgname=puttygen-gui
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='PuTTYgen 跨平台图形密钥工具'
+arch=('x86_64')
+url='https://github.com/lwl0820/putty'
+license=('MIT')
+depends=('glibc' 'libgcc' 'libstdc++' 'qt6-base>=6.8' 'qt6-translations' 'hicolor-icon-theme' 'noto-fonts-cjk')
+makedepends=('cmake' 'ninja')
+checkdepends=('python' 'openssh' 'desktop-file-utils')
+source=("puttygen-gui-${pkgver}.tar.gz")
+sha256sums=('@SOURCE_SHA256@')
+# 不额外生成独立调试包；发布物仅本应用，不包含测试或开发构建。
+options=('!debug')
+
+build() {
+    cmake -S "$srcdir/puttygen-gui-${pkgver}" -B "$srcdir/puttygen-gui-${pkgver}/.tmp/build/arch" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=ON \
+        -DPUTTYGEN_ARCH_PACKAGING=ON -DCMAKE_SKIP_INSTALL_RPATH=ON
+    cmake --build "$srcdir/puttygen-gui-${pkgver}/.tmp/build/arch" --parallel 4
+}
+
+check() {
+    QT_QPA_PLATFORM=offscreen ctest --test-dir "$srcdir/puttygen-gui-${pkgver}/.tmp/build/arch" --output-on-failure
+    desktop-file-validate "$srcdir/puttygen-gui-${pkgver}/.tmp/build/arch/puttygen-gui.desktop"
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install "$srcdir/puttygen-gui-${pkgver}/.tmp/build/arch"
+}

@@ -794,10 +794,6 @@ void ssh_bpp_common_setup(BinaryPacketProtocol *bpp)
 
 void ssh_bpp_free(BinaryPacketProtocol *bpp)
 {
-    /* 关闭可能发生在已解包、尚未被上层消费的安全点；归还全部队列。
-     * 先禁用出站队列回调，再删除 BPP 的待执行回调，避免析构后重入。 */
-    pq_in_clear(&bpp->in_pq);
-    pq_out_clear(&bpp->out_pq);
     delete_callbacks_for_context(bpp);
     bpp->vt->free(bpp);
 }

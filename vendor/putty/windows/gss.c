@@ -459,11 +459,6 @@ static Ssh_gss_stat ssh_sspi_init_sec_context(struct ssh_gss_library *lib,
     ULONG ret_flags=0;
     TimeStamp localexp;
 
-    if (expiry)
-        *expiry = GSS_NO_EXPIRATION;
-    if (lifetime)
-        *lifetime = 0;
-
     /* check if we have to delegate ... */
     if (to_deleg) flags |= ISC_REQ_DELEGATE;
     winctx->maj_stat = p_InitializeSecurityContextA(&winctx->cred_handle,
@@ -479,10 +474,7 @@ static Ssh_gss_stat ssh_sspi_init_sec_context(struct ssh_gss_library *lib,
                                                     &ret_flags,
                                                     &localexp);
 
-    /* 失败返回不保证提供有效时间戳，只转换本适配接受的成功状态。 */
-    if (winctx->maj_stat == SEC_E_OK ||
-        winctx->maj_stat == SEC_I_CONTINUE_NEEDED)
-        localexp_to_exp_lifetime(&localexp, expiry, lifetime);
+    localexp_to_exp_lifetime(&localexp, expiry, lifetime);
 
     /* prepare for the next round */
     winctx->context_handle = &winctx->context;
@@ -601,7 +593,6 @@ static Ssh_gss_stat ssh_sspi_get_mic(struct ssh_gss_library *lib,
     SecBufferDesc InputBufferDescriptor;
     SecBuffer InputSecurityToken[2];
 
-    SSH_GSS_CLEAR_BUF(hash);
     if (winctx == NULL) return SSH_GSS_FAILURE;
 
     winctx->maj_stat = 0;
@@ -612,10 +603,9 @@ static Ssh_gss_stat ssh_sspi_get_mic(struct ssh_gss_library *lib,
                                                  SECPKG_ATTR_SIZES,
                                                  &ContextSizes);
 
-    if (winctx->maj_stat != SEC_E_OK)
+    if (winctx->maj_stat != SEC_E_OK ||
+        ContextSizes.cbMaxSignature == 0)
         return winctx->maj_stat;
-    if (ContextSizes.cbMaxSignature == 0)
-        return SSH_GSS_FAILURE;
 
     InputBufferDescriptor.cBuffers = 2;
     InputBufferDescriptor.pBuffers = InputSecurityToken;
@@ -635,9 +625,6 @@ static Ssh_gss_stat ssh_sspi_get_mic(struct ssh_gss_library *lib,
     if (winctx->maj_stat == SEC_E_OK) {
         hash->length = InputSecurityToken[1].cbBuffer;
         hash->value = InputSecurityToken[1].pvBuffer;
-    } else {
-        /* 失败时没有把所有权交给调用者，仍须归还临时签名缓冲。 */
-        sfree(InputSecurityToken[1].pvBuffer);
     }
 
     return winctx->maj_stat;

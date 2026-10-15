@@ -718,7 +718,19 @@ void handle_sink_init(handle_sink *sink, struct handle *h);
 /*
  * Exports from handle-wait.c.
  */
-#include "handle-wait.h"
+typedef struct HandleWait HandleWait;
+typedef void (*handle_wait_callback_fn_t)(void *);
+HandleWait *add_handle_wait(HANDLE h, handle_wait_callback_fn_t callback,
+                            void *callback_ctx);
+void delete_handle_wait(HandleWait *hw);
+
+typedef struct HandleWaitList {
+    HANDLE handles[MAXIMUM_WAIT_OBJECTS];
+    int nhandles;
+} HandleWaitList;
+HandleWaitList *get_handle_wait_list(void);
+void handle_wait_activate(HandleWaitList *hwl, int index);
+void handle_wait_list_free(HandleWaitList *hwl);
 
 /*
  * Pageant-related pathnames.

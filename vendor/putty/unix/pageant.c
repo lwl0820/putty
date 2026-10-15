@@ -233,9 +233,7 @@ void keylist_update(void)
     /* Nothing needs doing in Unix Pageant */
 }
 
-#ifndef PAGEANT_DIR_PREFIX
 #define PAGEANT_DIR_PREFIX "/tmp/pageant"
-#endif
 
 static bool time_to_die = false;
 

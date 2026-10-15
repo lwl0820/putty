@@ -1,0 +1,32 @@
+{
+  "id": "puttygen-only",
+  "name": "puttygen-only",
+  "title": "仅保留 PuTTYgen 并整理工程目录",
+  "description": "移除其它套件组件，仅保留 PuTTYgen，整理根目录、构建、发布与文档。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "puttygen",
+  "package": null,
+  "priority": "P2",
+  "creator": "lwl0820",
+  "assignee": "lwl0820",
+  "createdAt": "2026-10-15",
+  "completedAt": null,
+  "branch": "codex/putty-suite-completion",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/tasks/10-15-puttygen-only/prd.md",
+    ".trellis/tasks/10-15-puttygen-only/implement.jsonl",
+    ".trellis/tasks/10-15-puttygen-only/check.jsonl",
+    ".trellis/tasks/10-15-puttygen-only/design.md",
+    ".trellis/tasks/10-15-puttygen-only/implement.md"
+  ],
+  "notes": "用户最新指令直接授权仅保留 PuTTYgen 并整理目录与 README。旧套件任务在本地 archive 中标记 cancelled，保留历史，不代表其验收完成。",
+  "meta": {}
+}

@@ -44,7 +44,7 @@ jobs:
       - name: 检查 Qt 构建脚本
         run: python -B -m unittest discover -s tools/qt/tests -v
       - name: 检查冒烟报告收集
-        run: python -B -m unittest discover -s apps/puttygen/packaging/tests -v
+        run: python -B -m unittest discover -s packaging/tests -v
       - uses: actions/cache@v4
         with:
           path: .tmp/qt
@@ -67,8 +67,8 @@ jobs:
             apt-get update && apt-get install -y --no-install-recommends python3 desktop-file-utils xvfb xauth x11-utils &&
             mkdir -p .tmp/package-smoke/temp &&
             export TMPDIR=/work/.tmp/package-smoke/temp &&
-            python3 apps/puttygen/packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform offscreen &&
-            xvfb-run -a python3 apps/puttygen/packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform xcb
+            python3 packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform offscreen &&
+            xvfb-run -a python3 packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform xcb
           '
       - name: 在对应干净发行版验证 Wayland 后端
         run: |
@@ -90,11 +90,11 @@ jobs:
               if [ "$ready" -ge 30 ]; then cat .tmp/package-smoke/weston.log; exit 1; fi
               sleep 0.5
             done
-            python3 apps/puttygen/packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform wayland
+            python3 packaging/smoke_package.py .tmp/packages/*.deb --install-deb --platform wayland
           '
       - name: 单独暂存冒烟检查报告
         if: always()
-        run: python apps/puttygen/packaging/collect_smoke_reports.py
+        run: python packaging/collect_smoke_reports.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -112,7 +112,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 检查冒烟报告收集
-        run: python3 -B -m unittest discover -s apps/puttygen/packaging/tests -v
+        run: python3 -B -m unittest discover -s packaging/tests -v
       - name: 准备临时目录与 Arch 镜像
         run: |
           mkdir -p .tmp/temp .tmp/packages/arch
@@ -127,15 +127,15 @@ jobs:
             pacman -Syu --noconfirm --needed git python cmake ninja qt6-base qt6-translations hicolor-icon-theme noto-fonts-cjk openssh desktop-file-utils
             useradd --uid "$BUILDER_UID" --home-dir /work/.tmp/arch-home --create-home builder
             install -d -o builder -g builder .tmp/arch-package .tmp/packages/arch
-            runuser -u builder -- python apps/puttygen/packaging/arch/build_arch.py
+            runuser -u builder -- python packaging/arch/build_arch.py
           '
       - name: 在独立干净 Arch 容器验证安装启动与卸载
         run: |
           docker run --rm -v "$PWD:/work" -w /work archlinux:base \
-            bash apps/puttygen/packaging/arch/smoke_arch.sh
+            bash packaging/arch/smoke_arch.sh
       - name: 单独暂存冒烟检查报告
         if: always()
-        run: python3 apps/puttygen/packaging/collect_smoke_reports.py
+        run: python3 packaging/collect_smoke_reports.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -170,7 +170,7 @@ jobs:
       - name: 检查 Qt 构建脚本
         run: python -B -m unittest discover -s tools/qt/tests -v
       - name: 检查冒烟报告收集
-        run: python -B -m unittest discover -s apps/puttygen/packaging/tests -v
+        run: python -B -m unittest discover -s packaging/tests -v
       - uses: actions/cache@v4
         with:
           path: .tmp/qt
@@ -199,11 +199,11 @@ jobs:
           cpack --config .tmp/build/release/CPackConfig.cmake -B .tmp/packages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $package = Get-ChildItem .tmp/packages/*.zip | Select-Object -First 1
-          python apps/puttygen/packaging/smoke_package.py $package.FullName --platform native
+          python packaging/smoke_package.py $package.FullName --platform native
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: 单独暂存冒烟检查报告
         if: always()
-        run: python apps/puttygen/packaging/collect_smoke_reports.py
+        run: python packaging/collect_smoke_reports.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

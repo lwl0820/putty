@@ -4,7 +4,7 @@ from ctypes import wintypes as W
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools/suite/windows"))
 from support import ValidationError, project_path
 

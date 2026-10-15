@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "tools/suite/windows/storage"))
 from support import (TEMPORARY_ROOT, ValidationError, file_digest, native_environment,
                      project_path, write_report)
 from run_storage_test import audit_storage_source
-from private_data import PrivateData
+from tools.suite.windows.private_data import PrivateData
 
 
 def safe_diagnostics(output, *, keygen=False):

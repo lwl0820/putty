@@ -108,6 +108,9 @@ class IsolationTest(unittest.TestCase):
     def test_unsafe_parent_permissions_are_rejected_without_repair(self):
         unsafe = self.parent / "unsafe"
         unsafe.mkdir(mode=0o755)
+        # mkdir 的 mode 受宿主 umask 影响；显式构造不安全权限才能验证拒绝分支。
+        unsafe.chmod(0o755)
+        self.assertEqual(stat.S_IMODE(unsafe.stat().st_mode), 0o755)
         with self.assertRaises(IsolationError):
             IsolationEnvironment(unsafe)
         self.assertEqual(stat.S_IMODE(unsafe.stat().st_mode), 0o755)

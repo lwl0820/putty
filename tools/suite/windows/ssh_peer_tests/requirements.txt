@@ -1,2 +1,3 @@
+# coding: utf-8
 # 仅用于受控 SSH 测试对端，不是产品运行依赖。
 paramiko==5.0.0

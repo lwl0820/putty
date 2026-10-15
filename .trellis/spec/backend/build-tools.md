@@ -19,6 +19,7 @@ python -B -m unittest discover -s tools/qt/tests -v
 - 标准流编码与 `subprocess` 捕获输出的解码属于不同边界。不要用全局 `PYTHONUTF8=1` 代替标准流设置，以免改变 MSVC 本机编码输出的解码方式。
 - 构建子进程输出继续直通，失败退出码继续向上传递；不因日志编码修复吞掉构建错误。
 - 测试不下载或构建 Qt；所有临时文件位于项目 `.tmp/`。
+- Windows 的旧 pip 读取含中文注释的 UTF-8 依赖清单时，需在清单首两行内声明 `# coding: utf-8`。标准流的 `PYTHONIOENCODING` 不控制输入文件解码；不要为此改变整个构建环境的 `PYTHONUTF8`。实际 pip 24.0 的强制 cp1252 探针须分别证明旧清单失败、声明后正确解码且依赖锁定不变。
 
 ## 4. 校验与错误矩阵
 

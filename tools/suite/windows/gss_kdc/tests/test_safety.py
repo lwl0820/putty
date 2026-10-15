@@ -252,6 +252,64 @@ class SafetyTests(unittest.TestCase):
         finally:
             private.close()
 
+    def test_fetch_uses_bytes_at_actual_ctypes_pointer_boundary(self):
+        import ctypes as C
+        import hashlib
+        import importlib
+        module = importlib.import_module('tools.suite.windows.gss_kdc.prepare')
+        content = b'fixed-public-download-content'
+        # 真实执行 WriteFile 缓冲区的 c_void_p 参数转换；不模拟 ctypes 接受 bytearray。
+        signature = C.CFUNCTYPE(C.c_int, C.c_void_p, C.c_void_p, C.c_uint32,
+                                C.POINTER(C.c_uint32), C.c_void_p)
+        calls = []
+        def converted(_handle, pointer, length, written, _overlapped):
+            calls.append(C.string_at(pointer, length))
+            written[0] = length
+            return 1
+        write_file = signature(converted)
+        written = C.c_uint32()
+        with self.assertRaises(C.ArgumentError):
+            write_file(1, bytearray(content), len(content), C.byref(written), None)
+        self.assertEqual(calls, [])
+        original_write = self.tree.write
+        def pointer_checked_write(path, value):
+            actual = C.c_uint32()
+            self.assertEqual(write_file(1, value, len(value), C.byref(actual), None), 1)
+            self.assertEqual(actual.value, len(content))
+            return original_write(path, value)
+        for algorithm in ('sha256', 'sha512'):
+            with self.subTest(algorithm=algorithm):
+                target = self.root / ('download-' + algorithm)
+                url = 'https://builds.dotnet.microsoft.com/dotnet/fixed-download'
+                source = io.BytesIO(content)
+                source.geturl = lambda: url
+                opener = mock.Mock()
+                opener.open.return_value = source
+                with mock.patch.object(module.urllib.request, 'build_opener', return_value=opener), \
+                        mock.patch.object(self.tree, 'write', side_effect=pointer_checked_write):
+                    self.assertEqual(module.fetch(self.tree, url, target,
+                        hashlib.new(algorithm, content).hexdigest(), algorithm=algorithm), target)
+                self.assertEqual(target.read_bytes(), content)
+        self.assertEqual(calls, [content, content])
+
+    def test_fetch_rejects_hash_mismatch_before_writing_download(self):
+        import importlib
+        module = importlib.import_module('tools.suite.windows.gss_kdc.prepare')
+        for algorithm, width in (('sha256', 64), ('sha512', 128)):
+            with self.subTest(algorithm=algorithm):
+                target = self.root / ('rejected-' + algorithm)
+                url = 'https://api.nuget.org/v3-flatcontainer/fixed-download'
+                source = io.BytesIO(b'changed-public-download')
+                source.geturl = lambda: url
+                opener = mock.Mock()
+                opener.open.return_value = source
+                with mock.patch.object(module.urllib.request, 'build_opener', return_value=opener), \
+                        mock.patch.object(self.tree, 'write') as write:
+                    with self.assertRaisesRegex(ValidationError, '哈希不符'):
+                        module.fetch(self.tree, url, target, '0' * width, algorithm=algorithm)
+                    write.assert_not_called()
+                self.assertFalse(target.exists())
+
     def test_failed_verification_overwrites_previous_success_summary(self):
         import contextlib
         import importlib

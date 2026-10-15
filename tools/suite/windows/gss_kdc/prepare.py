@@ -54,7 +54,7 @@ def fetch(tree, url, path, expected, *, algorithm="sha256", max_bytes=384 * 1024
                     raise ValidationError("下载归档超过固定体积上限")
         if hashlib.new(algorithm, content).hexdigest() != expected:
             raise ValidationError("依赖下载归档哈希不符")
-        tree.write(path, content)
+        tree.write(path, bytes(content))
     tree.check_file(path)
     value = hashlib.new(algorithm)
     with path.open("rb") as source:

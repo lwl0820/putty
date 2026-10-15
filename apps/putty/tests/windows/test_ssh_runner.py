@@ -108,6 +108,20 @@ class SSHRunnerTest(unittest.TestCase):
                 with self.subTest(missing=missing), self.assertRaises(runner.ValidationError):
                     runner.audit_map(path)
 
+    def test_keygen_map_requires_compiled_rng_function_instead_of_macro_name(self):
+        parent = runner.TEMPORARY_ROOT / "windows-terminal-runner-tests"
+        parent.mkdir(parents=True, exist_ok=True)
+        content = ("pg_core.c.obj\npg_platform.c.obj\nsshrand.c.obj\n"
+                   "pg_generate pg_save random_setup_custom BCryptGenRandom")
+        with tempfile.TemporaryDirectory(dir=parent) as folder:
+            path = Path(folder) / "keygen.map"
+            path.write_text(content, encoding="utf-8")
+            runner.audit_map(path, keygen=True)
+            # 只有宏名不能证明真实初始化函数已链接。
+            path.write_text(content.replace("random_setup_custom", "random_setup_special"), encoding="utf-8")
+            with self.assertRaises(runner.ValidationError):
+                runner.audit_map(path, keygen=True)
+
     def test_keygen_requires_actual_parameters_and_matching_build_configuration(self):
         report = keygen_report()
         result, blob = runner.decode_keygen(json.dumps(report).encode())

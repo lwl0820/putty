@@ -78,7 +78,8 @@ def audit_map(path, *, keygen=False):
         raise ValidationError("终端纵切不得链接生产 storage 对象")
     if keygen:
         required = ("pg_core", "pg_platform", "sshrand")
-        symbols = ("pg_generate", "pg_save", "random_setup_special", "BCryptGenRandom")
+        # random_setup_special 是头文件宏；链接图只能要求它实际展开调用的函数。
+        symbols = ("pg_generate", "pg_save", "random_setup_custom", "BCryptGenRandom")
         if re.search(r"(?<![\w])(?:noise|settings|guarded_terminal)(?:\.c)?\.obj\b", content, re.I):
             raise ValidationError("独立密钥工具混入了完整客户端或平台存储")
     else:

@@ -1,4 +1,6 @@
 /* 每个核心先接收同一 hive 的操作权，再允许真实 Conf／PRNG 初始化。 */
+/* PuTTY 平台头必须先建立 Winsock2 声明，随后才能引入 hive 的 windows.h。 */
+#include "putty.h"
 #include "hive_bootstrap.h"
 #include "seed_guard.h"
 #include "core/pt_terminal.h"

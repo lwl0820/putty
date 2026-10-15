@@ -18,6 +18,8 @@ void TerminalController::close();
 
 密钥路径经 `pt_filename_from_utf8` 转为正式 Filename：Windows 使用上游已公开声明的 `decode_utf8_to_wide_string` 和 `filename_from_wstr`，并释放临时宽字符缓冲；Unix 保留原路径字节构造。不能把 Qt 的 UTF-8 路径交给 Windows 按 ANSI 代码页解释的 `filename_from_str`。上游实现文件内的 `filename_from_utf8` 没有公共声明，不能直接跨翻译单元调用；自有平台适配 C 源在 MSVC 下将 C4013 作为编译错误，避免隐式 `int` 截断 x64 指针。原生平台用例核对中文及空格路径的宽字符结果，真实认证另用同类路径读出实际 PPK。
 
+Windows 同一 C 翻译单元同时使用 PuTTY 平台接口和 hive／Win32 头时，必须先包含 `putty.h`，由正式 `windows/platform.h` 建立 `winsock2.h`／`ws2tcpip.h` 后再包含 `windows.h`。不能先经 `private_hive.h` 间接引入旧 Winsock 头，再加载 PuTTY 头；也不能用忽略 SDK 重定义错误代替正确包含顺序。新增原生宿主须由 MSVC 实际编译确认，Linux 合同测试不能证明此项。
+
 ## 3. 所有权、顺序和容量
 
 - 唯一核心线程拥有 Terminal、Ldisc、Backend、Conf、客户端 PRNG、QFont 和可写 QImage。GUI 只消费独立完整帧与公开状态；禁止同步调用 GUI 字宽或等待 GUI 返回。

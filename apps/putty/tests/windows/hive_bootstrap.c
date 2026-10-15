@@ -1,4 +1,6 @@
 /* 此入口先于 Qt 创建映射；整个 QApplication 生命周期均不恢复个人 HKCU。 */
+/* PuTTY 平台头必须先建立 Winsock2 声明，随后才能引入 hive 的 windows.h。 */
+#include "putty.h"
 #include "hive_bootstrap.h"
 #include "seed_guard.h"
 #include <wchar.h>

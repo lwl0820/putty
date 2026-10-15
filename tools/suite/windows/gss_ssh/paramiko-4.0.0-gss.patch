@@ -1,0 +1,22 @@
+--- paramiko/auth_handler.py
++++ paramiko/auth_handler.py
+@@ -71,7 +71,7 @@
+     PartialAuthentication,
+ )
+ from paramiko.server import InteractiveQuery
+-from paramiko.ssh_gss import GSSAuth, GSS_EXCEPTIONS
++from tools.suite.windows.gss_ssh.paramiko_adapter import GSSAuth, GSS_EXCEPTIONS
+ 
+ 
+ class AuthHandler:
+@@ -962,7 +962,9 @@
+     def _handler_table(self):
+         # TODO: determine if we can cut this up like we did for the primary
+         # AuthHandler class.
+-        return self.__handler_table
++        # 测试夹具仅修复原函数的实例绑定，保留正式认证状态机。
++        return {kind: function.__get__(self, type(self))
++                for kind, function in self.__handler_table.items()}
+ 
+ 
+ class AuthOnlyHandler(AuthHandler):

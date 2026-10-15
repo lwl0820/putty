@@ -13,6 +13,7 @@ add_test(NAME runtime-lifecycle COMMAND "${Python3_EXECUTABLE}" -B
 set_tests_properties(runtime-lifecycle PROPERTIES LABELS runtime TIMEOUT 30 SKIP_RETURN_CODE 77)
 
 if(WIN32)
+  target_sources(putty-runtime-tests PRIVATE "${PROJECT_SOURCE_DIR}/vendor/putty/windows/no-jump-list.c")
   # 原生事件宿主禁止初始化存储和 PRNG；hive 验证完成前不启用持久化测试。
   add_executable(suite-windows-handle-tests windows/native_handle_wait.c)
   target_link_libraries(suite-windows-handle-tests PRIVATE suite-putty)
@@ -40,6 +41,28 @@ if(WIN32)
     set_tests_properties("runtime-windows-${kind}" PROPERTIES
       LABELS "runtime;windows-native" TIMEOUT 60)
   endforeach()
+
+  # 私有应用 hive 自测独立于无存储宿主，不自动开放原版存储入口。
+  set(_suite_hive_dir "${PROJECT_SOURCE_DIR}/tools/suite/windows/hive")
+  add_library(suite-windows-hive STATIC "${_suite_hive_dir}/private_hive.c")
+  target_include_directories(suite-windows-hive PUBLIC "${_suite_hive_dir}")
+  target_compile_definitions(suite-windows-hive PUBLIC _WIN32_WINNT=0x0602)
+  target_link_libraries(suite-windows-hive PUBLIC advapi32 bcrypt)
+  if(MSVC)
+    target_compile_options(suite-windows-hive PUBLIC /utf-8 /UNDEBUG)
+  else()
+    target_compile_options(suite-windows-hive PUBLIC -UNDEBUG)
+  endif()
+  add_executable(suite-windows-hive-tests "${_suite_hive_dir}/hive_test.c")
+  target_link_libraries(suite-windows-hive-tests PRIVATE suite-windows-hive)
+  target_compile_definitions(suite-windows-hive-tests PRIVATE
+    SUITE_HIVE_PROJECT_TMP="${PROJECT_SOURCE_DIR}/.tmp")
+  add_test(NAME runtime-windows-hive COMMAND "${Python3_EXECUTABLE}" -B
+    "${_suite_hive_dir}/run_hive_test.py"
+    --binary "$<TARGET_FILE:suite-windows-hive-tests>"
+    --parent "${PROJECT_SOURCE_DIR}/.tmp/windows-hive-${_runtime_build_id}")
+  set_tests_properties(runtime-windows-hive PROPERTIES
+    LABELS "runtime;windows-hive" TIMEOUT 90)
 endif()
 
 # 此 Unix 宿主不依赖 Qt；Windows 原生存储宿主待独立隔离夹具接入。

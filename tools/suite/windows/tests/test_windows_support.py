@@ -161,6 +161,28 @@ class WindowsContractTest(unittest.TestCase):
             self.assertTrue(any("\u4e00" <= character <= "\u9fff"
                                 for character in result.stdout.decode("utf-8")))
 
+    def test_hive_requirement_rejects_missing_duplicate_skipped_and_failed(self):
+        path = self.root / "hive-results.xml"
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        good = '<testcase name="runtime-windows-hive"/>'
+        path.write_text('<testsuite>' + native + good + '</testsuite>', encoding="utf-8")
+        self.assertEqual(inspect_results(path, True)["private_hive_probe"], "passed")
+        for hive in ('', good * 2, '<testcase name="runtime-windows-hive"><skipped/></testcase>',
+                     '<testcase name="runtime-windows-hive"><failure/></testcase>',
+                     '<testcase name="runtime-windows-hive"><error/></testcase>',
+                     '<testcase name="runtime-windows-hive" status="notrun"/>',
+                     '<testcase name="runtime-windows-hive" status="disabled"/>',
+                     '<testcase name="runtime-windows-hive" status="skipped"/>'):
+            path.write_text('<testsuite>' + native + hive + '</testsuite>', encoding="utf-8")
+            with self.subTest(hive=hive), self.assertRaises(ValidationError):
+                inspect_results(path, True)
+
+        for status in ("notrun", "disabled", "skipped"):
+            path.write_text('<testsuite><testcase name="runtime-windows-handles" status="' + status +
+                            '"/><testcase name="runtime-windows-events"/></testsuite>', encoding="utf-8")
+            with self.subTest(status=status), self.assertRaises(ValidationError):
+                inspect_results(path)
+
 
 if __name__ == "__main__":
     unittest.main()

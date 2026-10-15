@@ -171,6 +171,7 @@ jobs:
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-hive-tests.exe
             .tmp/build/windows-release/libs/putty-runtime/tests/suite-windows-storage-tests.exe
             .tmp/build/windows-release/apps/pageant/tests/pageant-windows-ipc-tests.exe
+            .tmp/build/windows-release/apps/pageant/tests/pageant-windows-ipc-tests.exe.map
             .tmp/build/windows-release/apps/putty/tests/putty-sspi-native-negative-tests.exe
             .tmp/windows-ci/install-release/bin/plink.exe
             .tmp/windows-ci/install-release/bin/pscp.exe

@@ -49,6 +49,45 @@ jobs:
           name: putty-suite-windows-mit-abi-evidence
           path: .tmp/windows-ci/reports/gss-mit-abi.json
           if-no-files-found: warn
+  windows-mit-kdc:
+    name: Windows x64 MIT 真实 AS 与 TGS
+    needs: windows-mit-abi
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8
+      TMP: ${{ github.workspace }}\.tmp\temp
+      TEMP: ${{ github.workspace }}\.tmp\temp
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备项目临时目录
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force .tmp/temp, .tmp/windows-ci/reports | Out-Null
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 核对 KDC 隔离与最终报告边界
+        shell: pwsh
+        run: |
+          python -B -m unittest discover -s tools/suite/windows/gss_kdc/tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 纯提取并核对 MIT 工具
+        shell: pwsh
+        run: |
+          $sevenzip = (Get-Command 7z.exe -ErrorAction Stop).Source
+          python -B tools/suite/windows/gss_mit/prepare_kfw.py --parent .tmp/windows-kdc-mit --sevenzip "$sevenzip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 验证真实票据交换、资料清理与个人目录无变化
+        shell: pwsh
+        run: |
+          python -B tools/suite/windows/gss_kdc/ci.py --tools .tmp/windows-kdc-tools --mit-directory .tmp/windows-kdc-mit/portable/bin --parent .tmp/windows-kdc-runs --report .tmp/windows-ci/reports/gss-mit-kdc.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: putty-suite-windows-mit-kdc-evidence
+          path: .tmp/windows-ci/reports/gss-mit-kdc.json
+          if-no-files-found: warn
   windows:
     name: Windows Server 2022 MSVC x64
     runs-on: windows-2022

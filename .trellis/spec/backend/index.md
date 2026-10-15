@@ -16,6 +16,8 @@
 
 修改私钥文件保存或 Windows 平台适配时，还需阅读 [private-file-permissions.md](private-file-permissions.md)。
 
+修改 Windows 套件夹具、原生依赖准备及认证证据门时，还需阅读 [suite-windows-fixtures.md](suite-windows-fixtures.md)。
+
 修改 Arch Linux 原生包、系统 Qt 安装或对应 Actions 时，还需阅读 [arch-package.md](arch-package.md)。
 
 ## 质量检查

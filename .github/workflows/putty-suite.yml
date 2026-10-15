@@ -9,6 +9,46 @@ permissions:
   contents: read
 
 jobs:
+  windows-mit-abi:
+    name: Windows x64 MIT 无凭据 ABI
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      PYTHONIOENCODING: utf-8
+      TMP: ${{ github.workspace }}\.tmp\temp
+      TEMP: ${{ github.workspace }}\.tmp\temp
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备项目临时目录
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force .tmp/temp, .tmp/windows-ci/reports | Out-Null
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 核对 MIT 文件与失败证据边界
+        shell: pwsh
+        run: |
+          python -B -m unittest discover -s tools/suite/windows/tests -p test_private_data.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B -m unittest discover -s tools/suite/windows/gss_mit/tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 纯提取固定 MIT 官方文件
+        shell: pwsh
+        run: |
+          $sevenzip = (Get-Command 7z.exe -ErrorAction Stop).Source
+          python -B tools/suite/windows/gss_mit/prepare_kfw.py --parent .tmp/windows-gss-mit --sevenzip "$sevenzip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 原生加载并核对私有配置
+        shell: pwsh
+        run: |
+          python -B tools/suite/windows/gss_mit/probe.py --directory .tmp/windows-gss-mit/portable/bin --parent .tmp/windows-gss-mit --report .tmp/windows-ci/reports/gss-mit-abi.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: putty-suite-windows-mit-abi-evidence
+          path: .tmp/windows-ci/reports/gss-mit-abi.json
+          if-no-files-found: warn
   windows:
     name: Windows Server 2022 MSVC x64
     runs-on: windows-2022

@@ -1,0 +1,34 @@
+{
+  "id": "putty-suite-foundation",
+  "name": "putty-suite-foundation",
+  "title": "共享核心与平台事件桥",
+  "description": "隔离固定上游构建与 PuTTYgen 配置，建立完整客户端核心、Qt 平台事件桥和受控集成验证基础。",
+  "status": "cancelled",
+  "dev_type": null,
+  "scope": "suite-runtime",
+  "package": null,
+  "priority": "P2",
+  "creator": "lwl0820",
+  "assignee": "lwl0820",
+  "createdAt": "2026-10-15",
+  "completedAt": null,
+  "branch": "codex/putty-suite-completion",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "10-15-putty-suite-completion",
+  "relatedFiles": [
+    ".trellis/tasks/10-15-putty-suite-foundation/prd.md",
+    ".trellis/tasks/10-15-putty-suite-foundation/design.md",
+    ".trellis/tasks/10-15-putty-suite-foundation/implement.md",
+    ".trellis/tasks/10-15-putty-suite-foundation/implement.jsonl",
+    ".trellis/tasks/10-15-putty-suite-foundation/check.jsonl"
+  ],
+  "notes": "用户在最终方案摘要后已明确批准实施。按父任务依赖和本目录检查点推进，保留未执行平台证据边界。\n2026-10-15：用户改为仅保留 PuTTYgen，本套件任务取消，由 10-15-puttygen-only 取代；不代表原验收已完成。",
+  "meta": {
+    "superseded_by": "10-15-puttygen-only"
+  }
+}

@@ -1,0 +1,16 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "发现适用核心和构建规范，不套用初始化模板"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "组件与共享目录责任及 PuTTYgen 保留边界"}
+{"file": ".trellis/spec/backend/build-tools.md", "reason": "公共脚本编码、可选依赖和私有运行目录报告规则"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "理解现有密钥 C 边界以避免回归，不将其具体 pg_* 签名套用新组件"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "发现 Qt GUI 规范并辨别既有组件适用范围"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "资源和发布插件及组件关闭规则"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "保留既有 PuTTYgen 状态/双语契约，新线程契约以本任务设计为准"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨 C/Qt/存储/进程边界的契约检查"}
+{"file": ".trellis/spec/backend/private-file-permissions.md", "reason": "涉及已有密钥读取和平台适配时保持私钥权限契约"}
+{"file": ".trellis/tasks/10-15-putty-suite-completion/research/terminal-architecture.md", "reason": "已核查的terminal-architecture.md源码证据、原版对照和技术验证门"}
+{"file": ".trellis/tasks/10-15-putty-suite-completion/research/terminal-parity.md", "reason": "已核查的terminal-parity.md源码证据、原版对照和技术验证门"}
+{"file": ".trellis/tasks/10-15-putty-suite-completion/research/pageant-parity.md", "reason": "已核查的pageant-parity.md源码证据、原版对照和技术验证门"}
+{"file": ".trellis/tasks/10-15-putty-suite-completion/research/build-cli.md", "reason": "已核查的build-cli.md源码证据、原版对照和技术验证门"}
+{"file": ".trellis/tasks/10-15-putty-suite-completion/research/planning-review.md", "reason": "已解决的规划审查：两阶段回调清理、验收编号和 Windows IPC/子进程隔离契约"}
+{"file": ".trellis/spec/backend/suite-build.md", "reason": "共享目标、客户端与代理 PRNG 边界"}
+{"file": ".trellis/spec/backend/suite-runtime.md", "reason": "唯一线程、队列限额、请求代次和两阶段关闭契约"}

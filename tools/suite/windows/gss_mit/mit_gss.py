@@ -11,6 +11,14 @@ KERBEROS_OID = bytes.fromhex("2a864886f712010202")
 DLL_ORDER = ("msvcr100.dll", "k5sprt64.dll", "comerr64.dll", "wshelp64.dll", "krb5_64.dll", "gssapi64.dll")
 
 
+class DefaultsFailure(ValidationError):
+    """默认值检查只公开固定阶段及原生数值状态，不公开实际配置字符串。"""
+
+    def __init__(self, stage, status=None):
+        self.stage, self.status = stage, status
+        super().__init__("MIT 私有配置默认值检查失败")
+
+
 class Buffer(C.Structure):
     _fields_ = [("length", C.c_size_t), ("value", P)]
 
@@ -97,16 +105,23 @@ class MitGss:
     def verify_defaults(self, expected_realm, expected_cache):
         """只读取配置和默认缓存名称字符串，绝不打开、解析或枚举缓存。"""
         context, realm = P(), P()
-        if self.krb5.krb5_init_context(C.byref(context)) or not context:
-            raise ValidationError("MIT 私有配置上下文初始化失败")
+        status = self.krb5.krb5_init_context(C.byref(context))
+        if status or not context:
+            raise DefaultsFailure("configuration-context", status)
         try:
-            if self.krb5.krb5_get_default_realm(context, C.byref(realm)) or not realm:
-                raise ValidationError("MIT 配置 realm 读取失败")
+            status = self.krb5.krb5_get_default_realm(context, C.byref(realm))
+            if status or not realm:
+                raise DefaultsFailure("configuration-realm-read", status)
             if C.string_at(realm) != expected_realm.encode("ascii"):
-                raise ValidationError("MIT 实际配置没有采用本次随机 realm")
+                raise DefaultsFailure("configuration-realm-match")
             cache = self.krb5.krb5_cc_default_name(context)
-            if not cache or C.string_at(cache) != expected_cache.encode("ascii"):
-                raise ValidationError("MIT 实际默认缓存名不是本次缺失 FILE 路径")
+            if not cache:
+                raise DefaultsFailure("configuration-cache-read")
+            # 固定 kfw-4.1-final 的 expand_path.c 会逐字把 '/' 改为 '\\'。
+            # 仍只接受唯一完整随机路径，不做 basename、后缀或宽松路径比较。
+            expected_cache = expected_cache.replace("/", "\\").encode("ascii")
+            if C.string_at(cache) != expected_cache:
+                raise DefaultsFailure("configuration-cache-match")
         finally:
             if realm:
                 self.krb5.krb5_free_default_realm(context, realm)

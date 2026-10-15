@@ -27,11 +27,13 @@ Windows 目录和文件复用共同的 `tools/suite/windows/private_data.py`，�
 
 ## 无凭据原生验证
 
-探针必须以独立 Python 进程启动。首次加载 MIT DLL 前，只保留启动程序需要的系统环境变量，删除继承的个人 KRB5、GSS、PATH、代理和追踪配置。`HOME/USERPROFILE/APPDATA/LOCALAPPDATA`、所有列明的 XDG 用户目录、`TMP/TEMP/TMPDIR`、KRB5 配置、缺失 FILE 缓存、缺失服务及客户端 keytab、replay 和插件目录均显式指向本次私有根。
+父探针只准备私有文件、持有目录保护句柄及汇总脱敏结果，不加载 MIT DLL，也不修改自身环境。原生调用由 `native_probe.py` 在独立 Python 子进程中执行，创建进程时即传入封闭环境及本次私有工作目录。子进程使用 `-I -S -B`，忽略个人 Python 环境、用户站点和站点启动钩子，并在加载 DLL 前核对实际环境字典。只保留启动程序需要的系统位置，删除继承的个人 KRB5、GSS、PATH、代理和追踪配置。`HOME/USERPROFILE/APPDATA/LOCALAPPDATA`、所有列明的 XDG 用户目录、`TMP/TEMP/TMPDIR`、KRB5 配置、缺失 FILE 缓存、缺失服务及客户端 keytab、replay 和插件目录均显式指向本次私有根。
 
 本阶段刻意不设置 `KRB5CCNAME`：私有配置内的 `default_ccache_name` 指向本次缺失的 FILE 文件，让真实 `krb5_cc_default_name()` 证明配置默认值已被采用。`krb5_get_default_realm()` 必须读回本次不可预测的随机 realm，作为同一私有配置确已加载的证据。两者只读取名称或配置字符串，不 resolve、open、遍历或读取任何缓存。探针结束还检查缓存与 keytab 均不存在。
 
-Python 与 KfW 的 MSVCR100 可各自保存 C 运行库环境副本。首次 DLL 加载后的 `os.environ` 修改或恢复不能证明另一个 CRT 已同步，也不能卸载旧环境。本探针在 DLL 加载前一次性完成环境设置，不在已加载 MIT 的进程内切换配置。后续有凭据夹具和终端测试也必须启动新的独立子进程，进程创建时即传入本次固定环境，再加载 MIT。
+固定 [kfw-4.1-final 的默认缓存选择](https://github.com/krb5/krb5/blob/aa75c3374ce654f3dcfd6ec50fc1f1dfeee673b9/src/lib/krb5/os/ccdefname.c) 对配置值调用路径展开；[同一提交的 Windows 路径展开](https://github.com/krb5/krb5/blob/aa75c3374ce654f3dcfd6ec50fc1f1dfeee673b9/src/lib/krb5/os/expand_path.c) 随后将每个 `/` 转为 `\`。因此配置使用正斜杠，预期 getter 值仅执行这一固定转换后做完整字节比较；不接受其它目录、缓存类型、basename 或后缀相同的值。realm 检查继续逐字节匹配。
+
+Python 与 KfW 的 MSVCR100 可各自保存 C 运行库环境副本。首次 DLL 加载后的 `os.environ` 修改或恢复不能证明另一个 CRT 已同步，也不能卸载旧环境。本探针不在父进程或已加载 MIT 的子进程内切换环境；后续有凭据夹具和终端测试也必须在进程创建时传入固定环境，再加载 MIT。
 
 六个 DLL 仅按绝对路径和 `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32` 装入。加载前六个目标模块必须均未加载；即使同名模块路径一致，也不能证明它的 CRT 在环境封闭后才初始化。加载后逐个核验实际模块句柄路径。三个 GSS 结构必须为 x64 的 16 字节、指针偏移 8；真实机制枚举必须包含 Kerberos OID，并真实释放返回集合。
 
@@ -39,8 +41,10 @@ Python 与 KfW 的 MSVCR100 可各自保存 C 运行库环境副本。首次 DLL
 
 ## 报告和证据边界
 
-两个 CLI 的标准输出均是唯一 JSON；失败只含固定阶段码。原生探针开始即把 `--report` 指定文件替换为失败占位，结束用同目录排他临时文件原子替换，避免崩溃后残留旧成功。结束时只删除本次已知配置、两个空目录及随机运行根，核验根已移除；出现未知内容时失败，不递归清理，也不删除准备好的 bin。可上传的内容仅公开版本、哈希、计数和检查布尔，不含私有根、配置内容、realm 随机值、票据、keytab 或完整日志。只能上传报告文件，不能递归上传准备根。
+两个公开 CLI 的标准输出均是唯一 JSON；失败只含固定阶段码及上下文初始化、realm 读取阶段对应的有符号 32 位原生返回码。配置检查区分上下文初始化、realm 读取与匹配、默认缓存名读取与匹配，仍不输出实际字符串。原生探针开始即把 `--report` 指定文件替换为失败占位，此占位同时覆盖父子进程；只有父进程在子进程已退出、结果协议有效且精确清理成功后，才刷新候选标准输出，再用同目录排他临时文件原子替换最终报告，避免崩溃后残留旧成功。验收必须同时具备最终报告和公开 CLI 退出 0；候选标准输出不具备独立验收效力，报告提交失败时仍可能已输出候选成功，但退出码为 1。内部子进程退出 0 仅表示固定 JSON 已送达；`passed: false` 仍由父进程传播成公开 CLI 的退出 1。子进程的重复或额外字段、未知阶段、非法计数或阶段不对应的返回码都使父进程失败。
 
-失败占位可靠落盘后，探针启动 daemon watchdog，使用固定 60 秒总预算覆盖 DLL 加载、ABI/API 调用、运行根清理、最终报告和标准输出刷新。超时直接以固定退出码 124 结束进程，不尝试把挂起的原生调用当成已取消，也不在超时分支写成功或声称已清理。结果尚未提交时，报告保留 `native-abi-incomplete` 失败占位；任何非零进程退出均使 CI 失败。短期限仅供回归调用 Python 入口注入，正式 CLI 没有修改期限的参数或环境开关。
+结束时只删除本次已知配置、两个空目录及随机运行根，核验根已移除；出现未知内容时失败，不递归清理，也不删除准备好的 bin。可上传的内容仅公开版本、哈希、计数和检查布尔，不含私有根、配置内容、realm 随机值、票据、keytab 或完整日志。只能上传报告文件，不能递归上传准备根。
+
+失败占位可靠落盘后，父探针启动 daemon watchdog，使用固定 60 秒总预算覆盖准备、原生子进程、运行根清理、最终报告和标准输出刷新。子进程另有至多 45 秒的独立 watchdog，其预算还须从父进程剩余预算扣除七秒管道收尾和清理余量；父进程的有界等待会在子期限后终止尚未退出的子进程。watchdog 超时直接以固定退出码 124 结束所在进程，不尝试把挂起的原生调用当成已取消，也不在超时分支写成功或声称已清理。结果尚未提交或标准输出刷新挂起时，报告保留 `native-abi-incomplete` 失败占位；最终文件提交与进程退出无法构成一个原子事务，因此公开 CLI 任一非零退出均使 CI 失败。短期限仅供回归调用 Python 入口注入，公开 CLI 没有修改期限的参数或环境开关。
 
 `passed: true` 的 `mit-gss-preparation` 不等于原生加载通过。`mit-gss-abi` 也固定保留 `credentials_acquired: false`、`kerberos_authentication_verified: false`、`sspi_verified: false`。只有 Windows CI 实际运行原生探针后才可报告加载和配置选择已验证；Linux 单元测试或静态 PE 检查不能替代它。

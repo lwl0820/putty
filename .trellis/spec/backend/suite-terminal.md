@@ -49,6 +49,8 @@ void TerminalController::close();
 
 `PUTTY_TERMINAL_ISOLATED_ROOT` 和报告实际解析路径均限定项目 `.tmp/`。Windows逐进程存储隔离未接入前不执行原存储初始化；SSPI窄调用夹具只证明生产错误分支，不冒充原生系统验证。各目标 Qt／系统／桌面结果分别记录，技术门未齐不得铺完整配置界面。
 
+Windows Unicode 绘图适配只在配置副本初始化，不能改变原 Conf。解除 GDI 字形标签时仍须保留 `VT_XWINDOWS`／`VT_OEMANSI` 的系统 OEM SCO 表；`VT_OEMONLY` 先走正式上游 CP437 字形／ACP 输入分支，再还原标签。不能通过统一强制 `VT_UNICODE` 改掉字符集语义。原生平台回归必须覆盖与 CP437 不同的 OEM 表；CPU 渲染器独立用例不链接上游存储或 PRNG。
+
 ## 7. 错误与正确做法
 
 错误：方向键直接 `runtime.submit()` 并忽略失败；`if (event.request == renderRequest_)` 在两个值均0时把未初始化配置提交。

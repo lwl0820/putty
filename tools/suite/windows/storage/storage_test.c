@@ -90,7 +90,7 @@ static int verify_session(void)
     CHECK(!strcmp(conf_get_str(conf, CONF_host), host));
     CHECK(conf_get_int(conf, CONF_port) == 2227);
     CHECK(conf_get_int(conf, CONF_protocol) == PROT_RAW);
-    CHECK(!strcmp(conf_get_str(conf, CONF_username), "suite-user"));
+    CHECK(!strcmp(conf_get_str_ambi(conf, CONF_username, NULL), "suite-user"));
     FontSpec *font = conf_get_fontspec(conf, CONF_font);
     CHECK(!strcmp(font->name, "Courier New") && font->height == 17 && font->isbold);
     conf_free(conf);

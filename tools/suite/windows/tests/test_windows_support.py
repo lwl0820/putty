@@ -14,7 +14,7 @@ sys.path.insert(0, str(SUITE_WINDOWS))
 from support import (CHECKS, TEMPORARY_ROOT, ValidationError, audit_link_map,
                      decode_native_report, native_environment, project_path)  # noqa: E402
 from check_build import assertions, assertions_enabled, installation  # noqa: E402
-from run_ctest import inspect_results, validate_selection  # noqa: E402
+from run_ctest import TERMINAL_EXPECTED, inspect_results, validate_selection  # noqa: E402
 from run_native_test import run  # noqa: E402
 
 
@@ -151,6 +151,41 @@ class WindowsContractTest(unittest.TestCase):
                     inspect_results(path)
             else:
                 self.assertEqual(inspect_results(path)["ctest_skipped"], ["runtime-lifecycle"])
+
+    def test_terminal_requires_exact_registered_set(self):
+        tests = [{"name": name} for name in sorted(TERMINAL_EXPECTED)]
+        validate_selection({"tests": tests}, TERMINAL_EXPECTED)
+        for changed in ([], tests[:-1], tests + tests[:1], tests[:-1] + [{"name": "unrelated"}]):
+            with self.subTest(changed=changed), self.assertRaises(ValidationError):
+                validate_selection({"tests": changed}, TERMINAL_EXPECTED)
+
+    def test_terminal_requires_four_actual_successes(self):
+        path = self.root / "terminal-results.xml"
+        native = '<testcase name="runtime-windows-handles"/><testcase name="runtime-windows-events"/>'
+        cases = ['<testcase name="' + name + '"/>' for name in sorted(TERMINAL_EXPECTED)]
+
+        def write(terminal):
+            path.write_text('<testsuite>' + native + terminal + '</testsuite>', encoding="utf-8")
+
+        write(''.join(cases))
+        report = inspect_results(path, require_terminal=True)
+        self.assertEqual(report["terminal_native_passed"], sorted(TERMINAL_EXPECTED))
+        self.assertIn("terminal-real-ssh-ppk", report["unverified"])
+        self.assertIn("terminal-native-sspi", report["unverified"])
+        for changed in ('', ''.join(cases[:-1]), ''.join(cases + cases[:1])):
+            write(changed)
+            with self.subTest(changed=changed), self.assertRaises(ValidationError):
+                inspect_results(path, require_terminal=True)
+        for name in sorted(TERMINAL_EXPECTED):
+            others = ''.join(case for case in cases if case != '<testcase name="' + name + '"/>')
+            for tag in ("skipped", "failure", "error"):
+                write(others + '<testcase name="' + name + '"><' + tag + '/></testcase>')
+                with self.subTest(name=name, tag=tag), self.assertRaises(ValidationError):
+                    inspect_results(path, require_terminal=True)
+            for status in ("notrun", "disabled", "skipped"):
+                write(others + '<testcase name="' + name + '" status="' + status + '"/>')
+                with self.subTest(name=name, status=status), self.assertRaises(ValidationError):
+                    inspect_results(path, require_terminal=True)
 
     def test_entry_help_survives_cp1252_redirect(self):
         for script in ("run_native_test.py", "run_ctest.py", "check_build.py"):

@@ -3,6 +3,7 @@
 #include "terminal.h"
 #include "ssh.h"
 #include "storage.h"
+#include "pt_platform.h"
 #include <limits.h>
 
 typedef struct pt_pending {
@@ -41,16 +42,6 @@ typedef struct pt_session {
 static pt_session *active_session;
 const bool share_can_be_downstream = true, share_can_be_upstream = true;
 const bool buildinfo_gtk_relevant = false;
-
-/* 原版默认值及存储格式保留；此纵切仅显式选择 UTF-8 和自己的离屏字体。 */
-char *platform_default_s(const char *name) { (void)name; return NULL; }
-bool platform_default_b(const char *name, bool value) { (void)name; return value; }
-int platform_default_i(const char *name, int value) { (void)name; return value; }
-FontSpec *platform_default_fontspec(const char *name)
-{ (void)name; return fontspec_new_default(); }
-Filename *platform_default_filename(const char *name)
-{ (void)name; return filename_from_str(""); }
-char *platform_get_x_display(void) { return dupstr(getenv("DISPLAY")); }
 
 pr_status pt_publish(pr_core *core, pt_packet header, const void *data,
                      size_t size, uint64_t request)
@@ -394,7 +385,7 @@ static void *create(pr_core *core, const void *options, size_t size)
     conf_set_int(s->conf, CONF_savelines, 2000);
     conf_set_bool(s->conf, CONF_no_remote_resize, true);
     conf_set_bool(s->conf, CONF_ssh_connection_sharing, false);
-    init_ucs_generic(s->conf, &s->unicode);
+    pt_init_unicode(s->conf, &s->unicode);
     s->terminal = term_init(s->conf, &s->unicode, &s->window);
     term_size(s->terminal, input->render.rows, input->render.columns, 2000);
     term_set_focus(s->terminal, true);

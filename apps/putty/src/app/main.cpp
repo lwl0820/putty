@@ -33,7 +33,11 @@ int main(int argc, char **argv)
         bool portValid = false; connection.port = parser.value("port").toInt(&portValid); connection.request_pty = 1;
         if (!valid || !portValid || connection.port < 1 || connection.port > 65535) return 2;
     }
+#ifdef Q_OS_WIN
+    pt_render_config render = {1, 80, 24, 14, 96, 1000, "Consolas"};
+#else
     pt_render_config render = {1, 80, 24, 14, 96, 1000, "monospace"};
+#endif
     TerminalController controller(render);
     TerminalWindow window(&controller); window.show();
     if (parser.isSet("host"))

@@ -44,4 +44,8 @@ ctest --test-dir .tmp/build/suite-terminal --output-on-failure -L terminal
 
 `terminal-gss-render-close` 另用公共 KerberosRealm／GSSSSHServer：重新取得仅有 TGT 的票据缓存，代理收到真实服务票据请求后等待 1.5 秒再转发给 KDC。受测终端不提供 PPK、不连接 agent，成功用例核对上游 GSSAPI 日志与 KDC 的 TGS_REQ；关闭用例从代理收取真实请求的标记开始，不把日志到达时机或模拟认证函数作为工作起点。Kerberos 数据库、keytab、票据、重放缓存和日志也只放在本次私有根。
 
-Linux 真实认证与本地边界离屏测试已通过，包含 Ubuntu 22.04／24.04 中固定 Qt6.8.3 的真实 PPK、GSS、背压及关闭执行；两版 PPK 最大心跳分别114／84ms，GSS为91／117ms，均低于250ms。上述目标执行使用容器和宿主共享的系统字体，不能替代 X11／Wayland 真桌面，也不代表 Windows 原生通过。Windows 终端构建、离屏字体、GSS／SSPI 和关闭均尚未验证，不能据本轮结果勾选两平台纵切门。
+Linux 真实认证与本地边界离屏测试已通过，包含 Ubuntu 22.04／24.04 中固定 Qt6.8.3 的真实 PPK、GSS、背压及关闭执行；两版 PPK 最大心跳分别114／84ms，GSS为91／117ms，均低于250ms。上述目标执行使用容器和宿主共享的系统字体，不能替代 X11／Wayland 真桌面，也不代表 Windows 原生通过。
+
+Windows 编译适配复用共享核心的正式平台默认值和 Unicode 初始化，Qt 默认选择 Consolas。Unicode 离屏设备将原版 GDI 字形标签还原为字符，避免把这些标签直接交给 Qt 绘制；XWINDOWS／OEMANSI 保留系统 OEM 的 SCO 字符表，OEMONLY 保留原版 CP437 字形和自动输入代码页选择。`terminal-windows-platform` 只创建显式配置字段，核对字符表、DEC 线绘及正式 Windows 默认值，并以窄初始化探针覆盖非 CP437 的 OEM 环境，不调用 `do_defaults` 或 PRNG。
+
+`terminal-cpu-render` 单独编译生产 CPU 渲染器，只链接 Qt，验证工作线程 Unicode／DPI、背压保留最新完整帧和 Qt 异步投递；它不带入 Terminal、Conf、运行时或上游存储。Windows 还注册两项 MIC 故障回归，SSPI 项即使在 Windows 上运行也只使用窄调用夹具。Windows 原生编译和这些本地用例需要由仓库 CI 取得实际结果；真实 SSH／PPK、GSS／SSPI 和关闭须在逐进程存储保护接入后另验，不能据本轮适配勾选双平台技术门。

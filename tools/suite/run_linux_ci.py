@@ -16,7 +16,7 @@ REQUIRED = {
     "suite-fixture", "runtime-lifecycle", "runtime-handle-registration",
     "runtime-core-link", "runtime-agent-core-link",
     "terminal-gss-mic-failures", "terminal-sspi-mic-failures-shim",
-    "terminal-render-bounds", "terminal-runner-report-paths",
+    "terminal-cpu-render", "terminal-render-bounds", "terminal-runner-report-paths",
     "terminal-ssh-kdf-render", "terminal-gss-render-close",
     "pageant-core-interop", "pageant-original-cli-entry",
 }

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Linux 上的窄 SSPI 类型／调用夹具；不代表 Windows 原生 API 已执行。 */
+/* 窄 SSPI 类型／调用夹具；包括 Windows 执行在内，都不代表原生 API 已调用。 */
 typedef int32_t Ssh_gss_stat;
 typedef void *Ssh_gss_ctx;
 typedef struct { size_t length; void *value; } Ssh_gss_buf;

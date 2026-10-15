@@ -1,6 +1,6 @@
 # Windows CI 与受控测试宿主
 
-本目录由独立工作流 `.github/workflows/putty-suite.yml` 使用，沿用 MSVC 2022 x64、Qt 6.8.3、CMake 3.30.9、Ninja 1.11.1.1。它目前接共享运行时和三个 CLI 的构建与安装；尚未接入终端/Pageant 的 Windows 产品验收，不修改原 PuTTYgen 工作流。
+本目录由独立工作流 `.github/workflows/putty-suite.yml` 使用，沿用 MSVC 2022 x64、Qt 6.8.3、CMake 3.30.9、Ninja 1.11.1.1。它接共享运行时、终端和三个 CLI 的构建，以及三个 CLI 的安装；终端四项无存储原生测试已经接线，真实认证与 Pageant 产品验收仍待接入，不修改原 PuTTYgen 工作流。
 
 ## 执行与结果
 
@@ -8,13 +8,15 @@
 
 ```powershell
 python -B -m unittest discover -s tools/suite/windows/tests -v
-cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
+cmake -S . -B .tmp/build/windows-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_PREFIX_PATH="$PWD/.tmp/qt" -DPUTTY_BUILD_PUTTYGEN=OFF -DPUTTY_BUILD_RUNTIME=ON -DPUTTY_BUILD_PUTTY=ON -DPUTTY_BUILD_PLINK=ON -DPUTTY_BUILD_PSCP=ON -DPUTTY_BUILD_PSFTP=ON
 cmake --build .tmp/build/windows-release --parallel 4
 $env:PATH = "$PWD/.tmp/qt/bin;$env:PATH"
-python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage
+python -B tools/suite/windows/run_ctest.py --build .tmp/build/windows-release --require-hive --require-storage --require-terminal
 ```
 
 每个命令失败应停止；工作流逐条检查退出码。`run_ctest.py` 先要求恰好注册 `runtime-windows-handles`、`runtime-windows-events`，再执行 CTest 并核实 JUnit 中这两个用例存在、未跳过、未失败。`--require-hive` 另要求唯一私有 hive 探针；`--require-storage` 必须同时指定前者，并要求唯一受控上游存储用例。零测试、重复、失败和跳过均不能满足相应要求。执行前删除旧 JUnit，避免误收历史结果。其它 CTest 的实际跳过名称单独列入 JSON；现有 `runtime-lifecycle` 尚未接入受控种子变体，仍返回 77。
+
+`--require-terminal` 另要求 `windows-terminal` 标签恰好注册并实际通过 `terminal-cpu-render`、`terminal-windows-platform`、`terminal-gss-mic-failures`、`terminal-sspi-mic-failures-shim` 四项。完整构建也编译 `putty-qt` 和原 `putty-terminal-tests`，但本轮不运行后者的存储／认证路径。四项成功不能替代真实 SSH／加密 PPK、原生 SSPI 或桌面交互；报告保留这些未验标签。
 
 | 宿主 | 实际调用路径及检查 |
 | --- | --- |
@@ -35,7 +37,7 @@ Release 链接显式保留四个拒绝入口。运行器先审查 MSVC map，要
 
 ## 构建与报告
 
-工作流先在禁用 Qt 查找时执行全关闭和 PSFTP-only 多配置构建；仅有 Debug 时 Release 安装必须失败。随后核对 Debug/Release 安装清单、配置对应的二进制摘要。完整 Release 构建包含共享核心和三个 CLI；`check_build.py` 核对实际核心编译命令、CLI 缓存及 Ninja 生成的编译命令仍启用断言，并要求安装文件集合恰好为选定的 CLI。
+工作流先在禁用 Qt 查找时执行全关闭和 PSFTP-only 多配置构建；仅有 Debug 时 Release 安装必须失败。随后核对 Debug/Release 安装清单、配置对应的二进制摘要。完整 Release 构建包含共享核心、终端和三个 CLI；`check_build.py` 核对实际核心编译命令、CLI 缓存及 Ninja 生成的编译命令仍启用断言，并要求安装文件集合恰好为选定的 CLI。
 
 只上传 `.tmp/windows-ci/reports/` 下明确的 JSON/XML、`private-hive.json`、`private-storage.json`、具名测试宿主 EXE 和三个安装 CLI EXE。没有上传整个 `.tmp/`、运行私有根、Qt/pip cache、密钥或 hive 树。事件 EXE 需要匹配 Qt DLL，属于测试程序，不是已完成部署的用户交付包。
 

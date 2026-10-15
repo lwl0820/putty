@@ -8,6 +8,36 @@ suite_add_backend_list(putty-terminal-tests PuTTY SSH SERIAL OTHERBACKENDS)
 target_compile_definitions(putty-terminal-tests PRIVATE
   PUTTY_TERMINAL_PROJECT_TMP="${PUTTY_SOURCE_DIR}/.tmp")
 
+# 此目标只链接生产渲染源码和 Qt；不带入 Terminal／Conf／PRNG／存储。
+add_executable(putty-terminal-cpu-tests cpu_render_test.cpp ../src/render/cpu_renderer.cpp)
+target_include_directories(putty-terminal-cpu-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PUTTY_SOURCE_DIR}/libs/putty-runtime/include")
+target_link_libraries(putty-terminal-cpu-tests PRIVATE Qt6::Widgets)
+target_compile_features(putty-terminal-cpu-tests PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(putty-terminal-cpu-tests PRIVATE /utf-8 /UNDEBUG)
+else()
+  target_compile_options(putty-terminal-cpu-tests PRIVATE -UNDEBUG)
+endif()
+string(SHA256 _terminal_cpu_build_id "${CMAKE_BINARY_DIR}")
+string(SUBSTRING "${_terminal_cpu_build_id}" 0 16 _terminal_cpu_build_id)
+set(_terminal_cpu_root "${PUTTY_SOURCE_DIR}/.tmp/terminal-cpu-${_terminal_cpu_build_id}")
+file(MAKE_DIRECTORY "${_terminal_cpu_root}/runtime" "${_terminal_cpu_root}/config")
+file(CHMOD "${_terminal_cpu_root}/runtime" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+add_test(NAME terminal-cpu-render COMMAND putty-terminal-cpu-tests)
+set_tests_properties(terminal-cpu-render PROPERTIES LABELS "terminal;render;no-storage" TIMEOUT 20
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen;TMPDIR=${_terminal_cpu_root}/runtime;TEMP=${_terminal_cpu_root}/runtime;TMP=${_terminal_cpu_root}/runtime;XDG_CONFIG_HOME=${_terminal_cpu_root}/config;XDG_RUNTIME_DIR=${_terminal_cpu_root}/runtime")
+
+if(WIN32)
+  add_executable(putty-terminal-platform-tests windows_platform_test.c ../src/core/pt_platform.c)
+  target_include_directories(putty-terminal-platform-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+  target_link_libraries(putty-terminal-platform-tests PRIVATE suite-putty)
+  add_test(NAME terminal-windows-platform COMMAND putty-terminal-platform-tests)
+  set_tests_properties(terminal-windows-platform PROPERTIES
+    LABELS "terminal;windows-terminal;no-storage" TIMEOUT 10)
+  set_property(TEST terminal-cpu-render APPEND PROPERTY LABELS windows-terminal)
+endif()
+
 # 编译上游函数原文，仅以窄类型／系统调用夹具注入失败，不复制生产算法。
 function(terminal_extract_function source begin end output)
   file(READ "${source}" _source)
@@ -21,24 +51,32 @@ function(terminal_extract_function source begin end output)
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${output}" "${_function}")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
 endfunction()
-if(NOT WIN32)
-  terminal_extract_function("${PUTTY_SOURCE_DIR}/vendor/putty/ssh/userauth2-client.c"
-    "static PktOut *ssh2_userauth_gss_packet(" "\n#endif\n\nstatic bool ssh2_userauth_get_specials"
-    userauth_mic_function.inc)
-  add_executable(putty-gss-mic-tests gss_mic_test.c)
-  target_include_directories(putty-gss-mic-tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-  target_link_libraries(putty-gss-mic-tests PRIVATE putty-terminal suite-putty)
-  suite_add_backend_list(putty-gss-mic-tests PuTTY SSH SERIAL OTHERBACKENDS)
-  add_test(NAME terminal-gss-mic-failures COMMAND putty-gss-mic-tests)
-  set_tests_properties(terminal-gss-mic-failures PROPERTIES LABELS "terminal;gss" TIMEOUT 10)
+terminal_extract_function("${PUTTY_SOURCE_DIR}/vendor/putty/ssh/userauth2-client.c"
+  "static PktOut *ssh2_userauth_gss_packet(" "\n#endif\n\nstatic bool ssh2_userauth_get_specials"
+  userauth_mic_function.inc)
+add_executable(putty-gss-mic-tests gss_mic_test.c)
+target_include_directories(putty-gss-mic-tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(putty-gss-mic-tests PRIVATE putty-terminal suite-putty)
+suite_add_backend_list(putty-gss-mic-tests PuTTY SSH SERIAL OTHERBACKENDS)
+add_test(NAME terminal-gss-mic-failures COMMAND putty-gss-mic-tests)
+set_tests_properties(terminal-gss-mic-failures PROPERTIES LABELS "terminal;gss;no-storage" TIMEOUT 10)
 
-  terminal_extract_function("${PUTTY_SOURCE_DIR}/vendor/putty/windows/gss.c"
-    "static Ssh_gss_stat ssh_sspi_get_mic(" "static Ssh_gss_stat ssh_sspi_verify_mic("
-    sspi_mic_function.inc)
-  add_executable(putty-sspi-mic-shim-tests sspi_mic_shim_test.c)
-  target_include_directories(putty-sspi-mic-shim-tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-  add_test(NAME terminal-sspi-mic-failures-shim COMMAND putty-sspi-mic-shim-tests)
-  set_tests_properties(terminal-sspi-mic-failures-shim PROPERTIES LABELS "terminal;gss;platform-shim" TIMEOUT 10)
+terminal_extract_function("${PUTTY_SOURCE_DIR}/vendor/putty/windows/gss.c"
+  "static Ssh_gss_stat ssh_sspi_get_mic(" "static Ssh_gss_stat ssh_sspi_verify_mic("
+  sspi_mic_function.inc)
+add_executable(putty-sspi-mic-shim-tests sspi_mic_shim_test.c)
+target_include_directories(putty-sspi-mic-shim-tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+if(MSVC)
+  target_compile_options(putty-sspi-mic-shim-tests PRIVATE /utf-8 /UNDEBUG)
+else()
+  target_compile_options(putty-sspi-mic-shim-tests PRIVATE -UNDEBUG)
+endif()
+add_test(NAME terminal-sspi-mic-failures-shim COMMAND putty-sspi-mic-shim-tests)
+set_tests_properties(terminal-sspi-mic-failures-shim PROPERTIES
+  LABELS "terminal;gss;platform-shim;no-storage" TIMEOUT 10)
+if(WIN32)
+  set_property(TEST terminal-gss-mic-failures terminal-sspi-mic-failures-shim
+    APPEND PROPERTY LABELS windows-terminal)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
   suite_prepare_test_keygen()

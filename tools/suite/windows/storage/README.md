@@ -1,6 +1,6 @@
 # Windows 受控上游存储宿主
 
-本目录独立于现有 runtime 与原版 CLI。前置的私有 hive 10 项检查已经在 Windows Server 2022、MSVC x64、Qt 6.8.3 的[第三轮仓库 CI](https://github.com/lwl0820/putty/actions/runs/38664741693)通过；这不代表本目录已经执行。本机没有 Windows SDK、MSVC、MinGW 或 Wine，当前只交付源代码、Python 回归和待原生执行的检查。
+本目录独立于现有 runtime 与原版 CLI。前置的私有 hive 10 项检查已经在 Windows Server 2022、MSVC x64、Qt 6.8.3 的[第三轮仓库 CI](https://github.com/lwl0820/putty/actions/runs/38664741693)通过；这不代表本目录通过。[本宿主首次仓库 CI](https://github.com/lwl0820/putty/actions/runs/38667665115)已经完成真实 MSVC 编译和安装，执行时因测试使用错误的用户名配置访问器而失败。现已改用对应 `STR_AMBI` 类型的 `conf_get_str_ambi`，本地配置类型与真实 Conf 回归通过，19 项原生检查仍待重新执行。本机没有 Windows SDK、MSVC、MinGW 或 Wine。
 
 ## 编译与执行
 
@@ -55,4 +55,6 @@ python -B tools/suite/windows/storage/run_storage_test.py --binary .tmp/build/wi
 
 独立审查另修复 `host_ca_load` 的三个临时缓冲泄漏，差异记录于 `0010-host-ca-load-buffers.patch`。`base64_decode_sb`、`percent_decode_sb` 和 `cert_expr_expression` 均返回独立结果，完成转换后释放注册表字符串和旧格式缓冲，不改变返回对象的所有权。正常与旧格式加载均已接入本批原生计划；本机仅确认源代码所有权，尚无 Windows 堆泄漏检测结果。
 
-任何本批通过只允许声称该独立变体宿主的实际结果，不能开放旧 runtime-lifecycle、未初始化的原版子进程或生产回退路径。Windows 10/11 真桌面、原版 CLI 存储和生产错误回退均保留未验；本批全部原生检查当前也未运行。
+`tests/test_conf_schema.py` 直接读取上游 `conf.h` 的字段主表，核对宿主所有 11 次配置访问器，并用首次 CI 的旧访问器验证回归能够拒绝类型不匹配。`conf_set_str` 可写入 `STR_AMBI`，而 `conf_get_str` 只接受 `STR`；此类问题不能通过关闭上游断言解决。
+
+任何本批通过只允许声称该独立变体宿主的实际结果，不能开放旧 runtime-lifecycle、未初始化的原版子进程或生产回退路径。Windows 10/11 真桌面、原版 CLI 存储和生产错误回退均保留未验；本批 19 项原生检查当前尚未整体通过。
